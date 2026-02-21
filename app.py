@@ -513,10 +513,13 @@ def detect_encoding(filepath):
 
 def find_matching_products_enhanced(composite_article, products):
     """
-    Улучшенный поиск с учетом похожих артикулов
+    Улучшенный поиск с учетом похожих артикулов и специальных символов
     """
     if not composite_article:
         return [], []
+    
+    # Очищаем артикул от лишних пробелов
+    composite_article = composite_article.strip()
     
     found_products = []
     not_found = []
@@ -526,8 +529,15 @@ def find_matching_products_enhanced(composite_article, products):
     
     # Также создаем словарь для поиска по началу артикула
     prefix_dict = {}
+    # И словарь для поиска по нормализованным артикулам (без пробелов и спецсимволов)
+    normalized_dict = {}
+    
     for p in products:
         article = p['article']
+        # Нормализуем артикул: убираем пробелы, приводим к нижнему регистру
+        normalized = re.sub(r'\s+', '', article).lower()
+        normalized_dict[normalized] = p
+        
         # Сохраняем первые части до _
         if '_' in article:
             prefix = article.split('_')[0]
@@ -537,78 +547,116 @@ def find_matching_products_enhanced(composite_article, products):
     
     app.logger.info(f"ENHANCED поиск в артикуле: '{composite_article}'")
     
-    def recursive_search(search_str, found_list):
+    # Нормализуем искомый артикул
+    normalized_search = re.sub(r'\s+', '', composite_article).lower()
+    
+    def recursive_search(search_str, found_list, depth=0):
         if not search_str or len(search_str.strip()) == 0:
             return
         
-        app.logger.info(f"  Поиск в: '{search_str}'")
+        # Очищаем от лишних пробелов
+        search_str = search_str.strip()
+        app.logger.info(f"  {'  ' * depth}Поиск в: '{search_str}'")
         
         # 1. Проверяем точное совпадение
         if search_str in products_dict:
-            app.logger.info(f"    -> Найдено точное совпадение: '{search_str}'")
+            app.logger.info(f"    {'  ' * depth}-> Найдено точное совпадение: '{search_str}'")
             found_list.append(products_dict[search_str])
             return
         
-        # 2. Если есть _, пробуем найти самое длинное совпадение
+        # 2. Проверяем нормализованное совпадение
+        normalized = re.sub(r'\s+', '', search_str).lower()
+        if normalized in normalized_dict:
+            product = normalized_dict[normalized]
+            app.logger.info(f"    {'  ' * depth}-> Найдено по нормализации: '{product['article']}'")
+            found_list.append(product)
+            return
+        
+        # 3. Если есть _, пробуем найти самое длинное совпадение
         if '_' in search_str:
             parts = search_str.split('_')
             
             # Пробуем от самого длинного к короткому
             for i in range(len(parts), 0, -1):
-                candidate = '_'.join(parts[:i])
+                candidate = '_'.join(parts[:i]).strip()
                 if candidate in products_dict:
-                    app.logger.info(f"    -> Найдено совпадение: '{candidate}'")
+                    app.logger.info(f"    {'  ' * depth}-> Найдено совпадение: '{candidate}'")
                     found_list.append(products_dict[candidate])
                     
                     # Ищем в оставшейся части
-                    remaining = search_str[len(candidate):].lstrip('_')
+                    remaining = search_str[len(candidate):].lstrip('_').strip()
                     if remaining:
-                        app.logger.info(f"    -> Ищем в остатке: '{remaining}'")
-                        recursive_search(remaining, found_list)
+                        app.logger.info(f"    {'  ' * depth}-> Ищем в остатке: '{remaining}'")
+                        recursive_search(remaining, found_list, depth + 1)
+                    return
+                
+                # Проверяем нормализованную версию кандидата
+                norm_candidate = re.sub(r'\s+', '', candidate).lower()
+                if norm_candidate in normalized_dict:
+                    product = normalized_dict[norm_candidate]
+                    app.logger.info(f"    {'  ' * depth}-> Найдено по нормализации: '{product['article']}'")
+                    found_list.append(product)
+                    
+                    remaining = search_str[len(candidate):].lstrip('_').strip()
+                    if remaining:
+                        app.logger.info(f"    {'  ' * depth}-> Ищем в остатке: '{remaining}'")
+                        recursive_search(remaining, found_list, depth + 1)
                     return
             
-            # 3. Пробуем найти по префиксу (первая часть)
-            first_part = parts[0]
+            # 4. Пробуем найти по префиксу (первая часть)
+            first_part = parts[0].strip()
             if first_part in prefix_dict:
-                app.logger.info(f"    -> Найдены товары с префиксом '{first_part}': {len(prefix_dict[first_part])}")
+                app.logger.info(f"    {'  ' * depth}-> Найдены товары с префиксом '{first_part}': {len(prefix_dict[first_part])}")
                 # Берем первый подходящий
                 for product in prefix_dict[first_part]:
-                    app.logger.info(f"    -> Используем: {product['article']}")
+                    app.logger.info(f"    {'  ' * depth}-> Используем: {product['article']}")
                     found_list.append(product)
                     
                     # Остаток - все что после первой части
-                    remaining = '_'.join(parts[1:])
+                    remaining = '_'.join(parts[1:]).strip()
                     if remaining:
-                        app.logger.info(f"    -> Ищем в остатке: '{remaining}'")
-                        recursive_search(remaining, found_list)
+                        app.logger.info(f"    {'  ' * depth}-> Ищем в остатке: '{remaining}'")
+                        recursive_search(remaining, found_list, depth + 1)
                     return
             
-            # 4. Пробуем найти любой из существующих артикулов внутри строки
-            for article in products_dict.keys():
+            # 5. Пробуем найти любой из существующих артикулов внутри строки
+            # Сортируем артикулы по длине (от длинных к коротким)
+            sorted_articles = sorted(products_dict.keys(), key=len, reverse=True)
+            for article in sorted_articles:
                 if article in search_str and len(article) > 3:
-                    app.logger.info(f"    -> Найдено вхождение: '{article}'")
+                    app.logger.info(f"    {'  ' * depth}-> Найдено вхождение: '{article}'")
                     
                     # Находим позицию
                     pos = search_str.find(article)
                     
                     # Часть до
-                    before = search_str[:pos].rstrip('_')
+                    before = search_str[:pos].rstrip('_').strip()
                     if before:
-                        app.logger.info(f"    -> Часть ДО: '{before}'")
-                        recursive_search(before, found_list)
+                        app.logger.info(f"    {'  ' * depth}-> Часть ДО: '{before}'")
+                        recursive_search(before, found_list, depth + 1)
                     
                     # Добавляем найденный
                     found_list.append(products_dict[article])
                     
                     # Часть после
-                    after = search_str[pos + len(article):].lstrip('_')
+                    after = search_str[pos + len(article):].lstrip('_').strip()
                     if after:
-                        app.logger.info(f"    -> Часть ПОСЛЕ: '{after}'")
-                        recursive_search(after, found_list)
+                        app.logger.info(f"    {'  ' * depth}-> Часть ПОСЛЕ: '{after}'")
+                        recursive_search(after, found_list, depth + 1)
                     return
         
-        # 5. Если ничего не нашли
-        app.logger.info(f"    -> НИЧЕГО не найдено в '{search_str}'")
+        # 6. Если ничего не нашли, пробуем разбить по пробелам
+        if ' ' in search_str:
+            parts = search_str.split()
+            if len(parts) > 1:
+                app.logger.info(f"    {'  ' * depth}-> Пробуем разбить по пробелам: {parts}")
+                for part in parts:
+                    if part.strip():
+                        recursive_search(part.strip(), found_list, depth + 1)
+                return
+        
+        # 7. Если ничего не нашли
+        app.logger.info(f"    {'  ' * depth}-> НИЧЕГО не найдено в '{search_str}'")
         not_found.append(search_str)
     
     recursive_search(composite_article, found_products)
@@ -631,6 +679,9 @@ def process_composite_article(composite_article, products, stocks, order_number,
     Обрабатывает составной артикул, находя все возможные товары
     """
     app.logger.info(f"Обработка составного артикула: {composite_article}")
+    
+    # Очищаем артикул от лишних пробелов
+    composite_article = composite_article.strip()
     
     # Используем улучшенную функцию поиска
     found_products, not_found_parts = find_matching_products_enhanced(composite_article, products)
@@ -665,9 +716,14 @@ def process_composite_article(composite_article, products, stocks, order_number,
     # Создаем новые товары для ненайденных частей
     for part in not_found_parts:
         if part and len(part.strip()) > 0:
-            # Проверяем, не существует ли уже товар с таким артикулом
+            part = part.strip()
+            
+            # Проверяем, не существует ли уже товар с таким артикулом (с учетом нормализации)
             existing = False
+            normalized_part = re.sub(r'\s+', '', part).lower()
+            
             for p in products:
+                # Проверяем точное совпадение
                 if p['article'] == part:
                     existing = True
                     app.logger.info(f"    Часть '{part}' найдена при повторной проверке!")
@@ -688,14 +744,39 @@ def process_composite_article(composite_article, products, stocks, order_number,
                     stocks[part] = current - quantity
                     found_count += 1  # Увеличиваем счетчик найденных
                     break
+                
+                # Проверяем нормализованное совпадение
+                normalized_article = re.sub(r'\s+', '', p['article']).lower()
+                if normalized_article == normalized_part:
+                    existing = True
+                    app.logger.info(f"    Часть '{part}' найдена по нормализации: '{p['article']}'")
+                    
+                    order_data = {
+                        "Operation Type": "Расход",
+                        "Date": datetime.now().strftime("%Y-%m-%d"),
+                        "Order Number": order_number,
+                        "Product Name": p['name'],
+                        "Product Article": p['article'],
+                        "Quantity": quantity
+                    }
+                    if save_order(order_data):
+                        app.logger.info(f"    Заказ сохранен для арт. {p['article']}")
+                    
+                    current = stocks.get(p['article'], 0)
+                    stocks[p['article']] = current - quantity
+                    found_count += 1
+                    break
             
             if not existing:
                 # Создаем новый товар
                 new_name = model or product_name or f"Товар из комплекта {part}"
                 
+                # Очищаем артикул от лишних пробелов
+                clean_part = re.sub(r'\s+', '_', part)  # Заменяем пробелы на подчеркивания
+                
                 new_product = {
                     'name': new_name,
-                    'article': part,
+                    'article': clean_part,
                     'model': model if model else ''
                 }
                 products.append(new_product)
@@ -703,7 +784,7 @@ def process_composite_article(composite_article, products, stocks, order_number,
                 if new_products_count_ref is not None:
                     new_products_count_ref['count'] += 1
                 
-                app.logger.info(f"    >>> СОЗДАН НОВЫЙ ТОВАР: {new_name} (арт. {part})")
+                app.logger.info(f"    >>> СОЗДАН НОВЫЙ ТОВАР: {new_name} (арт. {clean_part})")
                 
                 # Сохраняем заказ для нового товара
                 order_data = {
@@ -711,14 +792,14 @@ def process_composite_article(composite_article, products, stocks, order_number,
                     "Date": datetime.now().strftime("%Y-%m-%d"),
                     "Order Number": order_number,
                     "Product Name": new_name,
-                    "Product Article": part,
+                    "Product Article": clean_part,
                     "Quantity": quantity
                 }
                 if save_order(order_data):
-                    app.logger.info(f"    Заказ сохранен для нового арт. {part}")
+                    app.logger.info(f"    Заказ сохранен для нового арт. {clean_part}")
                 
                 # Устанавливаем отрицательный остаток (расход)
-                stocks[part] = -quantity
+                stocks[clean_part] = -quantity
     
     return found_count, created_count
 
@@ -2011,7 +2092,7 @@ def preview_inventory():
                 
                 current = stocks.get(article, 0)
                 
-                preview_items.append({
+                preview_items.push({
                     'article': article,
                     'name': name,
                     'current_stock': current,
@@ -3280,6 +3361,463 @@ def load_ozon_orders():
         return jsonify({'success': False, 'error': str(e)})
 
 
+# ==================== НОВЫЙ МАРШРУТ ДЛЯ ЗАГРУЗКИ ПРИХОДА ====================
+
+@app.route('/upload/income', methods=['GET', 'POST'])
+@login_required
+def upload_income():
+    """Загрузка прихода товаров из Excel файла"""
+    if request.method == 'GET':
+        return render_template('upload_income.html')
+    
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'Файл не выбран'})
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'Файл не выбран'})
+    
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    if file_ext not in {'.xlsx', '.xls'}:
+        return jsonify({'success': False, 'error': 'Неверный формат файла. Разрешены только Excel файлы (.xlsx, .xls)'})
+    
+    filename = secure_filename(f"income_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+    
+    try:
+        # Парсим Excel файл
+        data = parse_income_excel(filepath)
+        
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        
+        if not data or len(data.get('items', [])) == 0:
+            return jsonify({
+                'success': False,
+                'error': 'Не удалось найти данные в файле. Проверьте структуру файла.'
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': data,
+            'total_items': len(data['items']),
+            'total_quantity': sum(item['quantity'] for item in data['items'])
+        })
+        
+    except Exception as e:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        app.logger.error(f"Ошибка при обработке файла прихода: {e}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
+
+
+def parse_income_excel(filepath):
+    """
+    Парсит Excel файл с приходом товаров
+    Ожидаемые колонки: Название, Артикул, Количество (опционально: Поставщик, Цена, Примечание)
+    """
+    try:
+        df = pd.read_excel(filepath)
+        app.logger.info(f"Excel файл прихода прочитан. Колонки: {list(df.columns)}")
+        app.logger.info(f"Всего строк: {len(df)}")
+        
+        # Приводим названия колонок к нижнему регистру для поиска
+        df.columns = [str(col).strip().lower() for col in df.columns]
+        
+        # Определяем нужные колонки
+        name_col = None
+        article_col = None
+        quantity_col = None
+        supplier_col = None
+        price_col = None
+        note_col = None
+        
+        for col in df.columns:
+            col_lower = col.lower()
+            
+            if any(x in col_lower for x in ['название', 'товар', 'name', 'product', 'наименование']):
+                name_col = col
+                app.logger.info(f"Найдена колонка названия: {col}")
+            
+            elif any(x in col_lower for x in ['артикул', 'article', 'код', 'sku']):
+                article_col = col
+                app.logger.info(f"Найдена колонка артикула: {col}")
+            
+            elif any(x in col_lower for x in ['количество', 'кол-во', 'quantity', 'qty']):
+                quantity_col = col
+                app.logger.info(f"Найдена колонка количества: {col}")
+            
+            elif any(x in col_lower for x in ['поставщик', 'supplier', 'vendor']):
+                supplier_col = col
+                app.logger.info(f"Найдена колонка поставщика: {col}")
+            
+            elif any(x in col_lower for x in ['цена', 'price', 'cost']):
+                price_col = col
+                app.logger.info(f"Найдена колонка цены: {col}")
+            
+            elif any(x in col_lower for x in ['примечание', 'note', 'comment', 'описание']):
+                note_col = col
+                app.logger.info(f"Найдена колонка примечания: {col}")
+        
+        # Проверяем наличие обязательных колонок
+        if not article_col:
+            # Если нет колонки с артикулом, пробуем использовать первую колонку
+            if len(df.columns) >= 1:
+                article_col = df.columns[0]
+                app.logger.info(f"Колонка артикула не найдена, используем первую: {article_col}")
+            else:
+                raise Exception("Не найдена колонка с артикулом")
+        
+        if not name_col and len(df.columns) >= 2:
+            name_col = df.columns[1]
+            app.logger.info(f"Колонка названия не найдена, используем вторую: {name_col}")
+        
+        if not quantity_col and len(df.columns) >= 3:
+            quantity_col = df.columns[2]
+            app.logger.info(f"Колонка количества не найдена, используем третью: {quantity_col}")
+        
+        items = []
+        errors = []
+        stats = {
+            'new_products': 0,
+            'existing_products': 0,
+            'zero_quantity': 0,
+            'invalid_articles': 0
+        }
+        
+        # Загружаем существующие товары для проверки
+        products = load_products()
+        existing_articles = {p['article']: p for p in products}
+        
+        for idx, row in df.iterrows():
+            try:
+                # Получаем артикул
+                article = ''
+                if article_col and not pd.isna(row[article_col]):
+                    article = str(row[article_col]).strip()
+                
+                if not article:
+                    errors.append(f"Строка {idx + 2}: отсутствует артикул")
+                    stats['invalid_articles'] += 1
+                    continue
+                
+                # Валидация артикула
+                is_valid, error_msg = validate_article(article)
+                if not is_valid:
+                    errors.append(f"Строка {idx + 2}: {error_msg}")
+                    stats['invalid_articles'] += 1
+                    continue
+                
+                # Получаем название
+                name = ''
+                if name_col and not pd.isna(row[name_col]):
+                    name = str(row[name_col]).strip()
+                
+                if not name:
+                    name = f"Товар {article}"
+                
+                # Получаем количество
+                quantity = 0
+                if quantity_col and not pd.isna(row[quantity_col]):
+                    try:
+                        if isinstance(row[quantity_col], (int, float)):
+                            quantity = int(row[quantity_col])
+                        else:
+                            # Извлекаем число из строки
+                            numbers = re.findall(r'\d+', str(row[quantity_col]))
+                            quantity = int(numbers[0]) if numbers else 0
+                    except:
+                        quantity = 0
+                
+                if quantity <= 0:
+                    errors.append(f"Строка {idx + 2}: количество должно быть больше 0")
+                    stats['zero_quantity'] += 1
+                    continue
+                
+                # Получаем поставщика
+                supplier = ''
+                if supplier_col and not pd.isna(row[supplier_col]):
+                    supplier = str(row[supplier_col]).strip()
+                
+                # Получаем цену
+                price = None
+                if price_col and not pd.isna(row[price_col]):
+                    try:
+                        if isinstance(row[price_col], (int, float)):
+                            price = float(row[price_col])
+                        else:
+                            # Извлекаем число из строки
+                            numbers = re.findall(r'[\d.]+', str(row[price_col]))
+                            price = float(numbers[0]) if numbers else None
+                    except:
+                        price = None
+                
+                # Получаем примечание
+                note = ''
+                if note_col and not pd.isna(row[note_col]):
+                    note = str(row[note_col]).strip()
+                
+                # Проверяем, существует ли товар
+                is_new = article not in existing_articles
+                if is_new:
+                    stats['new_products'] += 1
+                else:
+                    stats['existing_products'] += 1
+                
+                items.append({
+                    'article': article,
+                    'name': name,
+                    'quantity': quantity,
+                    'supplier': supplier,
+                    'price': price,
+                    'note': note,
+                    'is_new': is_new,
+                    'row': idx + 2,
+                    'existing_name': existing_articles[article]['name'] if not is_new else None
+                })
+                
+            except Exception as e:
+                errors.append(f"Строка {idx + 2}: ошибка обработки - {str(e)}")
+        
+        return {
+            'success': True,
+            'items': items,
+            'errors': errors[:20],  # Ограничиваем количество ошибок
+            'stats': stats,
+            'has_supplier': supplier_col is not None,
+            'has_price': price_col is not None,
+            'has_note': note_col is not None
+        }
+        
+    except Exception as e:
+        app.logger.error(f"Ошибка при парсинге файла прихода: {e}")
+        traceback.print_exc()
+        raise
+
+
+@app.route('/upload/income/load', methods=['POST'])
+@login_required
+def load_income():
+    """Загрузка прихода товаров в систему"""
+    try:
+        data = request.json
+        items = data.get('items', [])
+        operation_type = data.get('operation_type', 'Приход')
+        order_number = data.get('order_number', f"ПРИХОД-{datetime.now().strftime('%Y%m%d')}")
+        supplier_default = data.get('supplier_default', '')
+        create_missing = data.get('create_missing', True)
+        
+        if not items:
+            return jsonify({'success': False, 'error': 'Нет данных для загрузки'})
+        
+        app.logger.info("=" * 60)
+        app.logger.info("ЗАПУСК ЗАГРУЗКИ ПРИХОДА ТОВАРОВ")
+        app.logger.info(f"Тип операции: {operation_type}")
+        app.logger.info(f"Номер заказа: {order_number}")
+        app.logger.info(f"Всего позиций: {len(items)}")
+        app.logger.info("=" * 60)
+        
+        products = load_products()
+        stocks = load_stocks()
+        
+        loaded_count = 0
+        created_count = 0
+        updated_count = 0
+        errors = []
+        
+        for item in items:
+            try:
+                article = item['article']
+                name = item['name']
+                quantity = int(item['quantity'])
+                supplier = item.get('supplier', '') or supplier_default
+                price = item.get('price')
+                note = item.get('note', '')
+                
+                app.logger.info(f"Обработка: арт='{article}', название='{name}', кол-во={quantity}")
+                
+                # Проверяем, существует ли товар
+                product_exists = False
+                existing_product = None
+                
+                for product in products:
+                    if product['article'] == article:
+                        product_exists = True
+                        existing_product = product
+                        break
+                
+                # Если товар не существует и разрешено создание
+                if not product_exists and create_missing:
+                    new_product = {
+                        'name': name,
+                        'article': article
+                    }
+                    if note:
+                        new_product['note'] = note
+                    products.append(new_product)
+                    created_count += 1
+                    app.logger.info(f"  >>> СОЗДАН НОВЫЙ ТОВАР: {name} (арт. {article})")
+                    existing_product = new_product
+                    product_exists = True
+                elif not product_exists:
+                    errors.append(f"Товар {article} не найден и создание отключено")
+                    continue
+                
+                # Обновляем название, если оно изменилось
+                if product_exists and existing_product and existing_product['name'] != name:
+                    old_name = existing_product['name']
+                    existing_product['name'] = name
+                    app.logger.info(f"  Обновлено название: '{old_name}' -> '{name}'")
+                    updated_count += 1
+                
+                # Формируем номер заказа с поставщиком
+                full_order_number = order_number
+                if supplier:
+                    full_order_number = f"{order_number}_{supplier}"
+                
+                # Добавляем примечание к заказу
+                order_note = f"Приход: {quantity} шт"
+                if price:
+                    order_note += f", цена: {price} руб"
+                if note:
+                    order_note += f", {note}"
+                
+                # Сохраняем операцию прихода
+                order_data = {
+                    "Operation Type": operation_type,
+                    "Date": datetime.now().strftime("%Y-%m-%d"),
+                    "Order Number": full_order_number,
+                    "Product Name": name,
+                    "Product Article": article,
+                    "Quantity": quantity
+                }
+                
+                if save_order(order_data):
+                    app.logger.info(f"  Заказ сохранен для арт. {article}")
+                else:
+                    app.logger.error(f"  Ошибка сохранения заказа для арт. {article}")
+                    errors.append(f"{article} - ошибка сохранения операции")
+                
+                # Обновляем остаток
+                current = stocks.get(article, 0)
+                stocks[article] = current + quantity
+                app.logger.info(f"  Остаток обновлен: {current} -> {stocks[article]}")
+                
+                loaded_count += 1
+                
+            except Exception as e:
+                app.logger.error(f"Ошибка обработки позиции {item.get('article', 'unknown')}: {e}")
+                errors.append(f"{item.get('article', 'unknown')}: {str(e)}")
+        
+        # Сохраняем изменения
+        if created_count > 0 or updated_count > 0:
+            app.logger.info(f"Сохраняем товары: создано={created_count}, обновлено={updated_count}")
+            save_products(products)
+        
+        app.logger.info("Сохраняем остатки")
+        save_stocks(stocks)
+        
+        app.logger.info("=" * 60)
+        app.logger.info(f"ИТОГИ ЗАГРУЗКИ ПРИХОДА: загружено={loaded_count}, создано={created_count}, обновлено={updated_count}")
+        app.logger.info("=" * 60)
+        
+        metrics.record_operation('income_loaded')
+        return jsonify({
+            'success': True,
+            'loaded': loaded_count,
+            'created': created_count,
+            'updated': updated_count,
+            'errors': errors[:20]
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Ошибка при загрузке прихода: {e}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/download/income/template')
+@login_required
+def download_income_template():
+    """Скачать шаблон для загрузки прихода"""
+    try:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Приход товаров"
+        
+        # Заголовки
+        headers = ["Название товара", "Артикул", "Количество", "Поставщик", "Цена", "Примечание"]
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_num)
+            cell.value = header
+            cell.font = Font(bold=True)
+            cell.fill = openpyxl.styles.PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+        
+        # Примеры
+        examples = [
+            ["Флакон 100 мл стеклянный", "YTA-10100_18.102wh", 50, "ООО Поставщик", 120.50, "Основной склад"],
+            ["Крышка с кисточкой белая", "PN_18_A_PEDZ_X_BIA", 100, "ИП Иванов", 45.00, "Для флаконов 10-15мл"],
+            ["Баночка косметическая 50 мл", "50.SJ_2", 30, "Завод Стеклотара", 85.00, ""],
+        ]
+        
+        for row_num, example in enumerate(examples, 2):
+            for col_num, value in enumerate(example, 1):
+                cell = ws.cell(row=row_num, column=col_num)
+                cell.value = value
+                if col_num == 1:  # Название
+                    cell.font = Font(italic=True)
+        
+        # Настройка ширины колонок
+        column_widths = [40, 25, 15, 25, 15, 30]
+        for i, width in enumerate(column_widths, 1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
+        
+        # Добавляем лист с инструкцией
+        ws_instruction = wb.create_sheet("Инструкция")
+        ws_instruction['A1'] = "ИНСТРУКЦИЯ ПО ЗАПОЛНЕНИЮ"
+        ws_instruction['A1'].font = Font(bold=True, size=14)
+        
+        instructions = [
+            ["1. Название товара", "- Обязательное поле", "Наименование товара"],
+            ["2. Артикул", "- Обязательное поле", "Уникальный идентификатор товара"],
+            ["3. Количество", "- Обязательное поле", "Целое положительное число"],
+            ["4. Поставщик", "- Опционально", "Название поставщика или тип перемещения"],
+            ["5. Цена", "- Опционально", "Цена за единицу (число)"],
+            ["6. Примечание", "- Опционально", "Дополнительная информация"],
+            ["", "", ""],
+            ["ПРИМЕРЫ ПОСТАВЩИКОВ:", "", ""],
+            ["- ООО Ромашка", "", ""],
+            ["- ИП Петров", "", ""],
+            ["- Собственное производство", "", ""],
+            ["- Возврат от клиента", "", ""],
+            ["- Перемещение со склада А", "", ""],
+        ]
+        
+        for row_num, instruction in enumerate(instructions, 3):
+            for col_num, text in enumerate(instruction, 1):
+                if text:
+                    cell = ws_instruction.cell(row=row_num, column=col_num)
+                    cell.value = text
+                    if col_num == 1 and row_num > 3:
+                        cell.font = Font(bold=True)
+        
+        # Настройка ширины колонок на листе инструкции
+        ws_instruction.column_dimensions['A'].width = 25
+        ws_instruction.column_dimensions['B'].width = 25
+        ws_instruction.column_dimensions['C'].width = 40
+        
+        filename = f"template_income_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        wb.save(filepath)
+        
+        return send_file(filepath, as_attachment=True, download_name=filename)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
 # ==================== ДИАГНОСТИЧЕСКИЙ МАРШРУТ ====================
 
 @app.route('/debug/check-article', methods=['POST'])
@@ -3355,6 +3893,58 @@ def debug_check_article():
     except Exception as e:
         app.logger.error(f"Ошибка в диагностике: {e}")
         traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/debug/check-specific', methods=['POST'])
+@login_required
+def debug_check_specific():
+    """Диагностика конкретного составного артикула"""
+    try:
+        data = request.json
+        article = data.get('article', '72722.15_ PN_18_A_PEDZ_X_BIA')
+        
+        products = load_products()
+        
+        # Ищем конкретные артикулы
+        target_articles = ['72722.15_12224', 'PN_18_A_PEDZ_X_BIA']
+        found_targets = {}
+        
+        for target in target_articles:
+            found = False
+            for p in products:
+                if p['article'] == target:
+                    found_targets[target] = {
+                        'found': True,
+                        'product': p
+                    }
+                    found = True
+                    break
+            if not found:
+                found_targets[target] = {
+                    'found': False,
+                    'similar': []
+                }
+                # Ищем похожие
+                for p in products:
+                    if target in p['article'] or p['article'] in target:
+                        found_targets[target]['similar'].append(p['article'])
+        
+        # Разбираем составной артикул
+        found_products, not_found = find_matching_products_enhanced(article, products)
+        
+        return jsonify({
+            'success': True,
+            'article': article,
+            'found_targets': found_targets,
+            'search_result': {
+                'found': [{'article': p['article'], 'name': p['name']} for p in found_products],
+                'not_found': not_found
+            },
+            'all_products_count': len(products)
+        })
+        
+    except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
 
@@ -3772,6 +4362,724 @@ def orders_calendar():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/upload/wb', methods=['GET', 'POST'])
+@login_required
+def upload_wb():
+    """Загрузка заказов Wildberries из Excel файла"""
+    if request.method == 'GET':
+        return render_template('upload_wb.html')
+    
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'Файл не выбран'})
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'Файл не выбран'})
+    
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    if file_ext not in {'.xlsx', '.xls'}:
+        return jsonify({'success': False, 'error': 'Неверный формат файла. Разрешены только Excel файлы (.xlsx, .xls)'})
+    
+    filename = secure_filename(f"wb_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+    
+    try:
+        # Парсим Excel файл
+        data = parse_wb_excel(filepath)
+        
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        
+        if not data or len(data.get('items', [])) == 0:
+            return jsonify({
+                'success': False,
+                'error': 'Не удалось найти заказы в файле. Проверьте структуру файла.'
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': data,
+            'total_orders': len(data.get('orders', [])),
+            'total_items': len(data['items']),
+            'total_quantity': data['total_quantity']
+        })
+        
+    except Exception as e:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        app.logger.error(f"Ошибка при обработке файла WB: {e}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
+
+
+def load_nomenclature_mapping():
+    """Загружает сопоставление номенклатуры и артикулов из файла"""
+    mapping_file = os.path.join(app.config['DATA_FOLDER'], 'nomenclature_mapping.json')
+    try:
+        if os.path.exists(mapping_file):
+            with open(mapping_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+    except Exception as e:
+        app.logger.error(f"Ошибка загрузки сопоставления номенклатуры: {e}")
+        return {}
+
+
+def save_nomenclature_mapping(mapping):
+    """Сохраняет сопоставление номенклатуры и артикулов"""
+    mapping_file = os.path.join(app.config['DATA_FOLDER'], 'nomenclature_mapping.json')
+    try:
+        with open(mapping_file, 'w', encoding='utf-8') as f:
+            json.dump(mapping, f, indent=2, ensure_ascii=False)
+        app.logger.info("Сопоставление номенклатуры сохранено")
+        return True
+    except Exception as e:
+        app.logger.error(f"Ошибка сохранения сопоставления номенклатуры: {e}")
+        return False
+
+
+@app.route('/upload/wb/mapping', methods=['POST'])
+@login_required
+def upload_wb_mapping():
+    """Загрузка файла сопоставления номенклатуры и артикулов"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'Файл не выбран'})
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'Файл не выбран'})
+        
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in {'.xlsx', '.xls', '.csv'}:
+            return jsonify({'success': False, 'error': 'Неверный формат файла. Разрешены: Excel, CSV'})
+        
+        # Сохраняем файл
+        filename = secure_filename(f"mapping_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        try:
+            # Читаем файл
+            if file_ext == '.csv':
+                df = pd.read_csv(filepath, encoding='utf-8')
+            else:
+                df = pd.read_excel(filepath)
+            
+            # Очищаем DataFrame
+            df = df.dropna(how='all')
+            
+            if df.empty:
+                return jsonify({'success': False, 'error': 'Файл не содержит данных'})
+            
+            # Приводим названия колонок к нижнему регистру
+            df.columns = [str(col).strip().lower() for col in df.columns]
+            
+            # Ищем колонки
+            nomenclature_col = None
+            article_col = None
+            
+            for col in df.columns:
+                if any(x in col for x in ['номенклатура', 'наименование', 'товар', 'name']):
+                    nomenclature_col = col
+                elif any(x in col for x in ['артикул', 'article', 'код', 'sku']):
+                    article_col = col
+            
+            if not nomenclature_col or not article_col:
+                return jsonify({
+                    'success': False, 
+                    'error': 'Не найдены колонки "Номенклатура" и "Артикул"'
+                })
+            
+            # Создаем сопоставление
+            mapping = {}
+            preview = []
+            
+            for idx, row in df.iterrows():
+                if pd.isna(row[nomenclature_col]) or pd.isna(row[article_col]):
+                    continue
+                
+                nomenclature = str(row[nomenclature_col]).strip()
+                article = str(row[article_col]).strip()
+                
+                if nomenclature and article:
+                    # Очищаем номенклатуру от лишних пробелов
+                    clean_nomenclature = re.sub(r'\s+', ' ', nomenclature)
+                    mapping[clean_nomenclature] = article
+                    
+                    preview.append({
+                        'nomenclature': clean_nomenclature[:100] + '...' if len(clean_nomenclature) > 100 else clean_nomenclature,
+                        'article': article
+                    })
+            
+            # Сохраняем сопоставление
+            save_nomenclature_mapping(mapping)
+            
+            # Удаляем файл
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            
+            return jsonify({
+                'success': True,
+                'mapping_count': len(mapping),
+                'preview': preview[:20]
+            })
+            
+        except Exception as e:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return jsonify({'success': False, 'error': str(e)})
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+def parse_wb_excel(filepath):
+    """
+    Парсит Excel файл с заказами Wildberries
+    Извлекает номенклатуру и сопоставляет с артикулами из справочника
+    """
+    orders = []
+    all_items = []
+    total_quantity = 0
+    
+    try:
+        df = pd.read_excel(filepath)
+        app.logger.info(f"Excel файл WB прочитан. Колонки: {list(df.columns)}")
+        app.logger.info(f"Всего строк: {len(df)}")
+        
+        # Приводим названия колонок к нижнему регистру для поиска
+        df.columns = [str(col).strip().lower() for col in df.columns]
+        
+        # Определяем нужные колонки
+        nomenclature_col = None  # Колонка с номенклатурой (название товара)
+        quantity_col = None      # Колонка с количеством
+        order_num_col = None     # Колонка с номером заказа (если есть)
+        price_col = None         # Колонка с ценой
+        total_col = None         # Колонка с суммой
+        
+        for col in df.columns:
+            col_lower = col.lower()
+            
+            if any(x in col_lower for x in ['номенклатура', 'товар', 'наименование', 'name']):
+                nomenclature_col = col
+                app.logger.info(f"Найдена колонка номенклатуры: {col}")
+            
+            elif any(x in col_lower for x in ['количество', 'кол-во', 'quantity', 'qty']):
+                quantity_col = col
+                app.logger.info(f"Найдена колонка количества: {col}")
+            
+            elif any(x in col_lower for x in ['номер', 'заказ', 'order', 'номер заказа']):
+                order_num_col = col
+                app.logger.info(f"Найдена колонка номера заказа: {col}")
+            
+            elif any(x in col_lower for x in ['цена', 'price']):
+                price_col = col
+                app.logger.info(f"Найдена колонка цены: {col}")
+            
+            elif any(x in col_lower for x in ['сумма', 'total', 'amount']):
+                total_col = col
+                app.logger.info(f"Найдена колонка суммы: {col}")
+        
+        if not nomenclature_col:
+            # Если нет колонки с номенклатурой, пробуем использовать колонку C (индекс 2)
+            if len(df.columns) >= 3:
+                nomenclature_col = df.columns[2]
+                app.logger.info(f"Колонка номенклатуры не найдена, используем колонку C: {nomenclature_col}")
+            else:
+                raise Exception("Не найдена колонка с номенклатурой")
+        
+        if not quantity_col and len(df.columns) >= 10:
+            # Пробуем найти колонку с количеством по позиции (обычно колонка L или M)
+            for col in df.columns[8:12]:  # Проверяем колонки I-L
+                if 'количество' in col.lower() or 'qty' in col.lower():
+                    quantity_col = col
+                    break
+            
+            if not quantity_col:
+                # Используем колонку L (индекс 11) как запасной вариант
+                quantity_col = df.columns[11] if len(df.columns) > 11 else df.columns[-1]
+                app.logger.info(f"Колонка количества не найдена, используем: {quantity_col}")
+        
+        # Загружаем сопоставление номенклатуры и артикулов
+        nomenclature_mapping = load_nomenclature_mapping()
+        app.logger.info(f"Загружено сопоставлений: {len(nomenclature_mapping)}")
+        
+        # Функция для поиска артикула по номенклатуре
+        def find_article_by_nomenclature(nomenclature, mapping):
+            if not nomenclature:
+                return None
+            
+            # Очищаем номенклатуру
+            clean_nomenclature = re.sub(r'\s+', ' ', nomenclature).strip()
+            
+            # Прямое совпадение
+            if clean_nomenclature in mapping:
+                return mapping[clean_nomenclature]
+            
+            # Поиск по частичному совпадению
+            for key, article in mapping.items():
+                if key in clean_nomenclature or clean_nomenclature in key:
+                    # Проверяем, что совпадение достаточно точное (более 70% длины)
+                    if len(key) > 10 and (len(key) / len(clean_nomenclature) > 0.7 or 
+                                         len(clean_nomenclature) / len(key) > 0.7):
+                        app.logger.info(f"  Найдено частичное совпадение: '{key}' -> '{article}'")
+                        return article
+            
+            return None
+        
+        # Функция для извлечения количества из упаковки
+        def extract_pack_quantity(nomenclature):
+            """Извлекает количество из названия упаковки (например, 'Набор 10шт.' -> 10)"""
+            if not nomenclature:
+                return 1
+            
+            nomenclature = str(nomenclature).lower()
+            
+            # Паттерны для поиска количества в упаковке
+            patterns = [
+                r'набор\s*(\d+)\s*шт',  # Набор 10шт
+                r'(\d+)\s*шт\.?',        # 10шт.
+                r'в упаковке\s*(\d+)',   # в упаковке 10
+                r'(\d+)\s*единиц',       # 10 единиц
+                r'пачка\s*(\d+)',        # пачка 10
+                r'(\d+)\s*набор'         # 10 набор
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, nomenclature)
+                if match:
+                    try:
+                        return int(match.group(1))
+                    except:
+                        pass
+            
+            return 1
+        
+        # Группируем по заказам, если есть номер заказа
+        if order_num_col:
+            grouped = df.groupby(order_num_col)
+            
+            for order_num, group in grouped:
+                order_items = []
+                order_number = str(order_num)
+                
+                app.logger.info(f"Обработка заказа {order_number}, позиций: {len(group)}")
+                
+                for _, row in group.iterrows():
+                    try:
+                        # Получаем номенклатуру
+                        nomenclature = ''
+                        if not pd.isna(row[nomenclature_col]):
+                            nomenclature = str(row[nomenclature_col]).strip()
+                        
+                        if not nomenclature:
+                            continue
+                        
+                        # Ищем артикул по номенклатуре
+                        article = find_article_by_nomenclature(nomenclature, nomenclature_mapping)
+                        
+                        if not article:
+                            app.logger.warning(f"  Не найден артикул для: {nomenclature[:50]}...")
+                            # Пробуем извлечь артикул из текста
+                            # Ищем паттерн типа YTA-10100_18.102wh в тексте
+                            article_pattern = r'[A-Z0-9]+[-_]?[A-Z0-9._]+'
+                            match = re.search(article_pattern, nomenclature)
+                            if match:
+                                article = match.group(0)
+                                app.logger.info(f"  Извлечен артикул из текста: {article}")
+                        
+                        # Получаем количество
+                        quantity = 1
+                        if quantity_col and not pd.isna(row[quantity_col]):
+                            try:
+                                if isinstance(row[quantity_col], (int, float)):
+                                    quantity = int(row[quantity_col])
+                                else:
+                                    numbers = re.findall(r'\d+', str(row[quantity_col]))
+                                    quantity = int(numbers[0]) if numbers else 1
+                            except:
+                                quantity = 1
+                        
+                        # Извлекаем количество в упаковке из названия
+                        pack_quantity = extract_pack_quantity(nomenclature)
+                        
+                        # Итоговое количество
+                        total_item_quantity = quantity * pack_quantity
+                        
+                        # Получаем цену
+                        price = None
+                        if price_col and not pd.isna(row[price_col]):
+                            try:
+                                if isinstance(row[price_col], (int, float)):
+                                    price = float(row[price_col])
+                                else:
+                                    numbers = re.findall(r'[\d.]+', str(row[price_col]))
+                                    price = float(numbers[0]) if numbers else None
+                            except:
+                                price = None
+                        
+                        # Получаем сумму
+                        total = None
+                        if total_col and not pd.isna(row[total_col]):
+                            try:
+                                if isinstance(row[total_col], (int, float)):
+                                    total = float(row[total_col])
+                                else:
+                                    numbers = re.findall(r'[\d.]+', str(row[total_col]))
+                                    total = float(numbers[0]) if numbers else None
+                            except:
+                                total = None
+                        
+                        item_data = {
+                            'nomenclature': nomenclature[:100] + '...' if len(nomenclature) > 100 else nomenclature,
+                            'full_nomenclature': nomenclature,
+                            'article': article or 'НЕ НАЙДЕН',
+                            'has_article': article is not None,
+                            'quantity': quantity,
+                            'pack_quantity': pack_quantity,
+                            'total_quantity': total_item_quantity,
+                            'price': price,
+                            'total': total,
+                            'calculation': f"{quantity} упак × {pack_quantity} шт = {total_item_quantity}"
+                        }
+                        
+                        order_items.append(item_data)
+                        all_items.append(item_data)
+                        total_quantity += total_item_quantity
+                        
+                        app.logger.info(f"  Товар: {item_data['article']} - {item_data['calculation']}")
+                        
+                    except Exception as e:
+                        app.logger.error(f"Ошибка обработки строки: {e}")
+                        continue
+                
+                if order_items:
+                    orders.append({
+                        'order_number': order_number,
+                        'date': datetime.now().strftime('%Y-%m-%d'),
+                        'items': order_items,
+                        'total_items': len(order_items),
+                        'total_quantity': sum(i['total_quantity'] for i in order_items)
+                    })
+        else:
+            # Если нет номера заказа, создаем один общий заказ
+            order_items = []
+            
+            for idx, row in df.iterrows():
+                try:
+                    nomenclature = ''
+                    if not pd.isna(row[nomenclature_col]):
+                        nomenclature = str(row[nomenclature_col]).strip()
+                    
+                    if not nomenclature:
+                        continue
+                    
+                    article = find_article_by_nomenclature(nomenclature, nomenclature_mapping)
+                    
+                    if not article:
+                        article_pattern = r'[A-Z0-9]+[-_]?[A-Z0-9._]+'
+                        match = re.search(article_pattern, nomenclature)
+                        if match:
+                            article = match.group(0)
+                    
+                    quantity = 1
+                    if quantity_col and not pd.isna(row[quantity_col]):
+                        try:
+                            if isinstance(row[quantity_col], (int, float)):
+                                quantity = int(row[quantity_col])
+                            else:
+                                numbers = re.findall(r'\d+', str(row[quantity_col]))
+                                quantity = int(numbers[0]) if numbers else 1
+                        except:
+                            quantity = 1
+                    
+                    pack_quantity = extract_pack_quantity(nomenclature)
+                    total_item_quantity = quantity * pack_quantity
+                    
+                    price = None
+                    if price_col and not pd.isna(row[price_col]):
+                        try:
+                            if isinstance(row[price_col], (int, float)):
+                                price = float(row[price_col])
+                            else:
+                                numbers = re.findall(r'[\d.]+', str(row[price_col]))
+                                price = float(numbers[0]) if numbers else None
+                        except:
+                            price = None
+                    
+                    item_data = {
+                        'nomenclature': nomenclature[:100] + '...' if len(nomenclature) > 100 else nomenclature,
+                        'full_nomenclature': nomenclature,
+                        'article': article or 'НЕ НАЙДЕН',
+                        'has_article': article is not None,
+                        'quantity': quantity,
+                        'pack_quantity': pack_quantity,
+                        'total_quantity': total_item_quantity,
+                        'price': price,
+                        'calculation': f"{quantity} упак × {pack_quantity} шт = {total_item_quantity}"
+                    }
+                    
+                    order_items.append(item_data)
+                    all_items.append(item_data)
+                    total_quantity += total_item_quantity
+                    
+                except Exception as e:
+                    app.logger.error(f"Ошибка обработки строки {idx}: {e}")
+                    continue
+            
+            if order_items:
+                orders.append({
+                    'order_number': f"WB-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                    'date': datetime.now().strftime('%Y-%m-%d'),
+                    'items': order_items,
+                    'total_items': len(order_items),
+                    'total_quantity': sum(i['total_quantity'] for i in order_items)
+                })
+        
+        # Подсчитываем статистику по найденным/ненайденным артикулам
+        found_articles = sum(1 for item in all_items if item['has_article'])
+        not_found_articles = len(all_items) - found_articles
+        
+        app.logger.info(f"Всего заказов WB: {len(orders)}")
+        app.logger.info(f"Всего позиций: {len(all_items)}")
+        app.logger.info(f"Найдено артикулов: {found_articles}")
+        app.logger.info(f"Не найдено артикулов: {not_found_articles}")
+        app.logger.info(f"Всего единиц товара: {total_quantity}")
+        
+        return {
+            'success': True,
+            'orders': orders,
+            'items': all_items,
+            'total_quantity': total_quantity,
+            'stats': {
+                'found_articles': found_articles,
+                'not_found_articles': not_found_articles,
+                'total_items': len(all_items)
+            }
+        }
+        
+    except Exception as e:
+        app.logger.error(f"Ошибка при парсинге файла WB: {e}")
+        traceback.print_exc()
+        raise
+
+
+@app.route('/upload/wb/load', methods=['POST'])
+@login_required
+def load_wb_orders():
+    """Загрузка выбранных заказов Wildberries в систему"""
+    try:
+        data = request.json
+        orders = data.get('orders', [])
+        
+        if not orders:
+            return jsonify({'success': False, 'error': 'Нет заказов для загрузки'})
+        
+        app.logger.info("=" * 60)
+        app.logger.info("ЗАПУСК ЗАГРУЗКИ ЗАКАЗОВ WILDBERRIES")
+        app.logger.info(f"Получено заказов: {len(orders)}")
+        app.logger.info("=" * 60)
+        
+        products = load_products()
+        stocks = load_stocks()
+        processed_orders = load_processed_orders()
+        
+        loaded_count = 0
+        skipped_count = 0
+        new_products_count = 0
+        composite_count = 0
+        missing_articles = []
+        composite_log = []
+        
+        for order in orders:
+            order_number = str(order.get('order_number', ''))
+            if not order_number:
+                continue
+                
+            if order_number in processed_orders:
+                skipped_count += 1
+                app.logger.info(f"Заказ {order_number} уже обработан, пропускаем")
+                continue
+            
+            app.logger.info(f"Загрузка заказа WB №{order_number}")
+            
+            items = order.get('items', [])
+            if not items:
+                continue
+                
+            app.logger.info(f"  Позиций в заказе: {len(items)}")
+            
+            for item in items:
+                article = str(item.get('article', '')).strip()
+                nomenclature = str(item.get('nomenclature', '')).strip()
+                quantity = int(item.get('total_quantity', item.get('quantity', 0)))
+                calculation = item.get('calculation', '')
+                
+                if article == 'НЕ НАЙДЕН' or not article:
+                    app.logger.warning(f"  Пропуск: не найден артикул для номенклатуры: {nomenclature}")
+                    missing_articles.append(f"{nomenclature} - артикул не найден")
+                    continue
+                
+                app.logger.info(f"  Товар: арт='{article}', номенклатура='{nomenclature}', кол-во={quantity} ({calculation})")
+                
+                if quantity <= 0:
+                    app.logger.warning(f"    Пропуск: некорректное количество {quantity}")
+                    continue
+                
+                new_count_ref = {'count': 0}
+                
+                if '_' in article:
+                    composite_count += 1
+                    
+                    log_entry = {
+                        'original': article,
+                        'order': order_number,
+                        'quantity': quantity,
+                        'calculation': calculation
+                    }
+                    
+                    app.logger.info(f"    Обработка составного артикула: {article}")
+                    
+                    found_count, created_count = process_composite_article(
+                        article, products, stocks, order_number, 
+                        quantity, nomenclature, '',
+                        new_products_count_ref=new_count_ref,
+                        missing_products=missing_articles
+                    )
+                    
+                    new_products_count += new_count_ref['count']
+                    
+                    log_entry['found'] = found_count
+                    log_entry['created'] = created_count
+                    composite_log.append(log_entry)
+                    
+                    app.logger.info(f"    Результат: найдено={found_count}, создано={created_count}")
+                    
+                else:
+                    app.logger.info(f"    Обработка одиночного артикула: {article}")
+                    
+                    success = process_single_article(
+                        article, '', nomenclature, quantity,
+                        products, stocks, order_number, 
+                        display_name=nomenclature,
+                        new_products_count_ref=new_count_ref,
+                        missing_products=missing_articles
+                    )
+                    
+                    new_products_count += new_count_ref['count']
+                    app.logger.info(f"    Результат: {'успешно' if success else 'ошибка'}")
+            
+            save_processed_order(order_number)
+            loaded_count += 1
+            app.logger.info(f"Заказ {order_number} успешно обработан")
+        
+        if new_products_count:
+            app.logger.info(f"Сохраняем {new_products_count} новых товаров")
+            save_products(products)
+        
+        save_stocks(stocks)
+        
+        if composite_log:
+            log_file = os.path.join(app.config['DATA_FOLDER'], 'wb_composite_articles_log.json')
+            try:
+                with open(log_file, 'w', encoding='utf-8') as f:
+                    json.dump(composite_log, f, indent=2, ensure_ascii=False)
+                app.logger.info(f"Лог составных артикулов WB сохранен в {log_file}")
+            except Exception as e:
+                app.logger.error(f"Ошибка сохранения лога: {e}")
+        
+        app.logger.info("=" * 60)
+        app.logger.info(f"ИТОГИ ЗАГРУЗКИ: загружено={loaded_count}, пропущено={skipped_count}, новых товаров={new_products_count}")
+        app.logger.info("=" * 60)
+        
+        metrics.record_operation('wb_orders_loaded')
+        return jsonify({
+            'success': True,
+            'loaded': loaded_count,
+            'skipped': skipped_count,
+            'new_products': new_products_count,
+            'composite_articles': composite_count,
+            'composite_log': composite_log[:20],
+            'missing_articles': missing_articles[:10]
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Ошибка при загрузке заказов WB: {e}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/download/wb/template')
+@login_required
+def download_wb_template():
+    """Скачать шаблон для сопоставления номенклатуры и артикулов"""
+    try:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Сопоставление"
+        
+        # Заголовки
+        headers = ["Номенклатура (из WB)", "Артикул (из Ozon/базы)"]
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_num)
+            cell.value = header
+            cell.font = Font(bold=True)
+            cell.fill = openpyxl.styles.PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+        
+        # Примеры из вашего файла
+        examples = [
+            ["Набор диффузор 30мл коричневый+черная Ал+белая 18.102+фибр. пал 3 набора", "diffuser_YTA-1030_ALbl_18.102wh_stickbl_3"],
+            ["Набор 5мл (коричневый) + Пипетка стекло 5мл ШН черная Н - черная 594", "72722.5_11131"],
+            ["Набор пипетка стекло 5мл ШН белая К - золото глянец К", "Z-0405_03234"],
+            ["Набор 10мл (коричневый) + Крышка с запорным конусом GL18 OV1-18.102 белая", "10ZPSR_18.102wh"],
+            ["Набор 15мл (синий) + Крышка черная с кисточкой PN_18_A_PEDZ_52_C", "72722.15_PN_18_A_PEDZ_52_C"],
+        ]
+        
+        for row_num, example in enumerate(examples, 2):
+            for col_num, value in enumerate(example, 1):
+                cell = ws.cell(row=row_num, column=col_num)
+                cell.value = value
+        
+        # Настройка ширины колонок
+        ws.column_dimensions['A'].width = 80
+        ws.column_dimensions['B'].width = 40
+        
+        # Добавляем лист с инструкцией
+        ws_instruction = wb.create_sheet("Инструкция")
+        ws_instruction['A1'] = "ИНСТРУКЦИЯ ПО ЗАПОЛНЕНИЮ"
+        ws_instruction['A1'].font = Font(bold=True, size=14)
+        
+        instructions = [
+            ["1. Скопируйте номенклатуру из файла WB в колонку A"],
+            ["2. Найдите соответствующий артикул в файле Ozon или базе данных"],
+            ["3. Вставьте артикул в колонку B"],
+            ["4. Сохраните файл и загрузите его как справочник"],
+            ["", ""],
+            ["ВАЖНО:"],
+            ["- Номенклатура должна точно соответствовать тексту из WB"],
+            ["- Один артикул может соответствовать нескольким вариантам номенклатуры"],
+            ["- После загрузки справочника можно загружать заказы WB"],
+        ]
+        
+        for row_num, instruction in enumerate(instructions, 3):
+            for col_num, text in enumerate(instruction, 1):
+                if text:
+                    cell = ws_instruction.cell(row=row_num, column=col_num)
+                    cell.value = text
+        
+        ws_instruction.column_dimensions['A'].width = 60
+        
+        filename = f"template_wb_mapping_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        wb.save(filepath)
+        
+        return send_file(filepath, as_attachment=True, download_name=filename)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 
 @app.route('/metrics')
 @login_required
@@ -3850,13 +5158,12 @@ if __name__ == '__main__':
     print("Логин: admin")
     print("Пароль: admin")
     print("="*60)
-    print("Новые возможности:")
-    print("✅ Кэширование данных для ускорения")
-    print("✅ Индексация товаров для быстрого поиска")
-    print("✅ Отчет по составным артикулам")
-    print("✅ Поиск по части артикула")
-    print("✅ Асинхронная обработка файлов")
-    print("✅ Системные метрики")
+    print("НОВЫЕ ВОЗМОЖНОСТИ:")
+    print("✅ Загрузка прихода товаров из Excel")
+    print("✅ Учет поставщиков и типов операций")
+    print("✅ Автоматическое создание новых товаров")
+    print("✅ Обновление названий существующих товаров")
+    print("✅ Шаблон для скачивания")
     print("="*60)
     print("Для остановки нажмите Ctrl+C")
     print("="*60)
