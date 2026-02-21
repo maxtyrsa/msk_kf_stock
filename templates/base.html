@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Складской учет{% endblock %}</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- SweetAlert2 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+    <!-- Дополнительные CSS -->
+    {% block extra_css %}{% endblock %}
+    
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .navbar-brand {
+            font-weight: 600;
+            font-size: 1.5rem;
+        }
+        
+        .sidebar {
+            min-height: calc(100vh - 56px);
+            background: linear-gradient(180deg, #2c3e50 0%, #1a252f 100%);
+            color: white;
+            padding-top: 20px;
+        }
+        
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 20px;
+            margin: 4px 0;
+            border-radius: 5px;
+            transition: all 0.3s;
+        }
+        
+        .sidebar .nav-link:hover {
+            background: rgba(255,255,255,0.1);
+            color: white;
+            transform: translateX(5px);
+        }
+        
+        .sidebar .nav-link.active {
+            background: #007bff;
+            color: white;
+        }
+        
+        .sidebar .nav-link i {
+            width: 24px;
+            margin-right: 10px;
+        }
+        
+        .main-content {
+            padding: 30px;
+            background-color: #f8f9fa;
+            min-height: calc(100vh - 56px);
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+            height: 100%;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        
+        .stat-icon {
+            font-size: 2.5rem;
+            color: #007bff;
+        }
+        
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .card-header {
+            border-radius: 10px 10px 0 0 !important;
+            font-weight: 600;
+        }
+        
+        .btn {
+            border-radius: 5px;
+            padding: 8px 16px;
+            font-weight: 500;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            border: none;
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
+            border: none;
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #ffc107 0%, #d39e00 100%);
+            border: none;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #dc3545 0%, #bd2130 100%);
+            border: none;
+        }
+        
+        .table {
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .table thead th {
+            background: #f8f9fa;
+            border-bottom: 2px solid #dee2e6;
+            font-weight: 600;
+        }
+        
+        .badge {
+            padding: 5px 10px;
+            font-weight: 500;
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #6c757d;
+        }
+        
+        /* Анимации */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease;
+        }
+        
+        /* Стили для модальных окон */
+        .modal-content {
+            border: none;
+            border-radius: 15px;
+        }
+        
+        .modal-header {
+            border-radius: 15px 15px 0 0;
+        }
+        
+        /* Стили для форм */
+        .form-control, .form-select {
+            border-radius: 5px;
+            border: 1px solid #ced4da;
+            padding: 10px 15px;
+        }
+        
+        .form-control:focus, .form-select:focus {
+            border-color: #80bdff;
+            box-shadow: 0 0 0 0.2rem rgba(0,123,255,0.25);
+        }
+        
+        /* Стили для уведомлений */
+        .alert {
+            border-radius: 10px;
+            border: none;
+        }
+        
+        /* Адаптивность */
+        @media (max-width: 768px) {
+            .sidebar {
+                min-height: auto;
+            }
+            
+            .main-content {
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Навигационная панель -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+                <i class="fas fa-warehouse me-2"></i>
+                Складской учет
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    {% if session.user %}
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" 
+                           href="{{ url_for('dashboard') }}">
+                            <i class="fas fa-tachometer-alt me-1"></i>Дашборд
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'products_list' %}active{% endif %}" 
+                           href="{{ url_for('products_list') }}">
+                            <i class="fas fa-boxes me-1"></i>Товары
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'orders_list' %}active{% endif %}" 
+                           href="{{ url_for('orders_list') }}">
+                            <i class="fas fa-shopping-cart me-1"></i>Заказы
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'inventory' %}active{% endif %}" 
+                           href="{{ url_for('inventory') }}">
+                            <i class="fas fa-clipboard-list me-1"></i>Инвентаризация
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'reports' %}active{% endif %}" 
+                           href="{{ url_for('reports') }}">
+                            <i class="fas fa-chart-bar me-1"></i>Отчеты
+                        </a>
+                    </li>
+                    <!-- НОВЫЙ ПУНКТ: Отчет по составным артикулам -->
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'composite_report_page' %}active{% endif %}" 
+                           href="{{ url_for('composite_report_page') }}">
+                            <i class="fas fa-puzzle-piece me-1"></i>Составные артикулы
+                        </a>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="uploadDropdown" role="button" 
+                           data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-upload me-1"></i>Загрузка
+                        </a>
+                        <ul class="dropdown-menu" aria-labelledby="uploadDropdown">
+                            <li>
+                                <a class="dropdown-item" href="{{ url_for('upload_pdf') }}">
+                                    <i class="fas fa-file-pdf me-2 text-danger"></i>Загрузить PDF
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item" href="{{ url_for('upload_ozon') }}">
+                                    <i class="fas fa-file-excel me-2 text-primary"></i>Загрузить Ozon
+                                </a>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <a class="dropdown-item" href="{{ url_for('upload_products') }}">
+                                    <i class="fas fa-file-import me-2 text-success"></i>Загрузить товары
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item" href="{{ url_for('upload_new_products') }}">
+                                    <i class="fas fa-plus-circle me-2 text-info"></i>Только новые товары
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+                    {% endif %}
+                </ul>
+                <ul class="navbar-nav">
+                    {% if session.user %}
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" 
+                           data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-user-circle me-1"></i>
+                            {{ session.user }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+                            <li>
+                                <a class="dropdown-item" href="#" onclick="createBackup()">
+                                    <i class="fas fa-download me-2 text-success"></i>Скачать бэкап
+                                </a>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <a class="dropdown-item text-danger" href="{{ url_for('logout') }}">
+                                    <i class="fas fa-sign-out-alt me-2"></i>Выйти
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Боковое меню (опционально, можно добавить при необходимости) -->
+            {% if session.user and show_sidebar|default(true) %}
+            <div class="col-md-2 p-0 sidebar">
+                <div class="nav flex-column">
+                    <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" 
+                       href="{{ url_for('dashboard') }}">
+                        <i class="fas fa-tachometer-alt"></i>
+                        <span>Дашборд</span>
+                    </a>
+                    <a class="nav-link {% if request.endpoint == 'products_list' %}active{% endif %}" 
+                       href="{{ url_for('products_list') }}">
+                        <i class="fas fa-boxes"></i>
+                        <span>Товары</span>
+                    </a>
+                    <a class="nav-link {% if request.endpoint == 'orders_list' %}active{% endif %}" 
+                       href="{{ url_for('orders_list') }}">
+                        <i class="fas fa-shopping-cart"></i>
+                        <span>Заказы</span>
+                    </a>
+                    <a class="nav-link {% if request.endpoint == 'inventory' %}active{% endif %}" 
+                       href="{{ url_for('inventory') }}">
+                        <i class="fas fa-clipboard-list"></i>
+                        <span>Инвентаризация</span>
+                    </a>
+                    <a class="nav-link {% if request.endpoint == 'reports' %}active{% endif %}" 
+                       href="{{ url_for('reports') }}">
+                        <i class="fas fa-chart-bar"></i>
+                        <span>Отчеты</span>
+                    </a>
+                    <!-- НОВЫЙ ПУНКТ В БОКОВОМ МЕНЮ -->
+                    <a class="nav-link {% if request.endpoint == 'composite_report_page' %}active{% endif %}" 
+                       href="{{ url_for('composite_report_page') }}">
+                        <i class="fas fa-puzzle-piece"></i>
+                        <span>Составные артикулы</span>
+                    </a>
+                    
+                    <div class="mt-4 px-3">
+                        <hr class="bg-white opacity-25">
+                        <h6 class="text-white-50 px-3">Быстрые действия</h6>
+                    </div>
+                    
+                    <a class="nav-link" href="#" onclick="showAddOperationModal()">
+                        <i class="fas fa-plus-circle"></i>
+                        <span>Добавить операцию</span>
+                    </a>
+                    <a class="nav-link" href="{{ url_for('upload_pdf') }}">
+                        <i class="fas fa-file-pdf"></i>
+                        <span>Загрузить PDF</span>
+                    </a>
+                    <a class="nav-link" href="{{ url_for('export_inventory') }}">
+                        <i class="fas fa-download"></i>
+                        <span>Скачать бланк</span>
+                    </a>
+                </div>
+            </div>
+            <div class="col-md-10 main-content">
+            {% else %}
+            <div class="col-12 main-content">
+            {% endif %}
+                <!-- Flash сообщения -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                {% if category == 'success' %}
+                                    <i class="fas fa-check-circle me-2"></i>
+                                {% elif category == 'danger' %}
+                                    <i class="fas fa-exclamation-circle me-2"></i>
+                                {% elif category == 'warning' %}
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                {% elif category == 'info' %}
+                                    <i class="fas fa-info-circle me-2"></i>
+                                {% endif %}
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <!-- Основной контент -->
+                {% block content %}{% endblock %}
+                
+                <!-- Футер -->
+                <footer class="footer mt-5">
+                    <p class="mb-0">
+                        <i class="fas fa-copyright me-1"></i>
+                        Складской учет {{ now().year }} | 
+                        <span class="text-muted">Версия 3.0 с поддержкой составных артикулов и расширенной аналитикой</span>
+                    </p>
+                </footer>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно добавления операции (будет показано во всех страницах) -->
+    <div class="modal fade" id="addOperationModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-plus-circle me-2"></i>
+                        Добавить операцию
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="operationForm">
+                        <div class="mb-3">
+                            <label class="form-label">Тип операции</label>
+                            <select class="form-select" id="operationType" required>
+                                <option value="Приход">Приход</option>
+                                <option value="Расход">Расход</option>
+                                <option value="Инвентаризация">Инвентаризация</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Артикул</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="articleInput" 
+                                       placeholder="Введите артикул" required>
+                                <button class="btn btn-outline-secondary" type="button" onclick="checkProduct()">
+                                    <i class="fas fa-search"></i>
+                                </button>
+                            </div>
+                            <div id="productInfo" class="mt-2" style="display: none;">
+                                <div class="alert alert-info">
+                                    <strong id="productName"></strong><br>
+                                    <span id="productStock"></span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Количество</label>
+                            <input type="number" class="form-control" id="quantityInput" min="1" value="1" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Номер заказа (опционально)</label>
+                            <input type="text" class="form-control" id="orderNumberInput" 
+                                   placeholder="Например: Заказ-123">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Дата</label>
+                            <input type="date" class="form-control" id="dateInput" 
+                                   value="{{ now().strftime('%Y-%m-%d') }}">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-1"></i>Отмена
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="addOperation()">
+                        <i class="fas fa-save me-1"></i>Сохранить
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Скрипты -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    
+    <script>
+        // Глобальные функции
+        
+        // Показать модальное окно добавления операции
+        function showAddOperationModal() {
+            // Сброс формы
+            document.getElementById('operationForm').reset();
+            document.getElementById('productInfo').style.display = 'none';
+            document.getElementById('dateInput').value = new Date().toISOString().split('T')[0];
+            
+            const modal = new bootstrap.Modal(document.getElementById('addOperationModal'));
+            modal.show();
+        }
+        
+        // Проверка товара по артикулу
+        function checkProduct() {
+            const article = document.getElementById('articleInput').value.trim();
+            
+            if (!article) {
+                Swal.fire({
+                    title: 'Ошибка!',
+                    text: 'Введите артикул',
+                    icon: 'error',
+                    confirmButtonText: 'OK'
+                });
+                return;
+            }
+            
+            fetch('/products/search/exact?article=' + encodeURIComponent(article))
+                .then(response => response.json())
+                .then(data => {
+                    if (data.found) {
+                        document.getElementById('productName').textContent = data.product.name;
+                        document.getElementById('productStock').textContent = 
+                            `Текущий остаток: ${data.product.stock}`;
+                        document.getElementById('productInfo').style.display = 'block';
+                    } else {
+                        document.getElementById('productName').textContent = 'Товар не найден';
+                        document.getElementById('productStock').textContent = 
+                            'Будет создан новый товар';
+                        document.getElementById('productInfo').style.display = 'block';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+        
+        // Добавление операции
+        function addOperation() {
+            const type = document.getElementById('operationType').value;
+            const article = document.getElementById('articleInput').value.trim();
+            const quantity = parseInt(document.getElementById('quantityInput').value);
+            const orderNumber = document.getElementById('orderNumberInput').value.trim() || 'Ручной ввод';
+            const date = document.getElementById('dateInput').value;
+            
+            if (!article || !quantity) {
+                Swal.fire({
+                    title: 'Ошибка!',
+                    text: 'Заполните все поля',
+                    icon: 'error',
+                    confirmButtonText: 'OK'
+                });
+                return;
+            }
+            
+            Swal.fire({
+                title: 'Сохранение...',
+                text: 'Пожалуйста, подождите',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+            
+            fetch('/operation/add', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    type: type,
+                    article: article,
+                    quantity: quantity,
+                    order_number: orderNumber,
+                    date: date
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                Swal.close();
+                
+                if (data.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('addOperationModal')).hide();
+                    
+                    let message = data.message;
+                    if (data.results) {
+                        message += '<br><br>';
+                        data.results.forEach(r => {
+                            if (r.status === 'success') {
+                                message += `<span class="text-success">✅ ${r.article} → ${r.new_stock}</span><br>`;
+                            } else {
+                                message += `<span class="text-danger">❌ ${r.article}: ${r.message}</span><br>`;
+                            }
+                        });
+                    }
+                    
+                    Swal.fire({
+                        title: 'Успех!',
+                        html: message,
+                        icon: 'success',
+                        timer: 3000,
+                        showConfirmButton: true
+                    }).then(() => {
+                        location.reload();
+                    });
+                } else {
+                    Swal.fire({
+                        title: 'Ошибка!',
+                        text: data.error || 'Ошибка при сохранении',
+                        icon: 'error',
+                        confirmButtonText: 'OK'
+                    });
+                }
+            })
+            .catch(error => {
+                Swal.close();
+                Swal.fire({
+                    title: 'Ошибка!',
+                    text: 'Ошибка при сохранении: ' + error.message,
+                    icon: 'error',
+                    confirmButtonText: 'OK'
+                });
+            });
+        }
+        
+        // Создание бэкапа
+        function createBackup() {
+            Swal.fire({
+                title: 'Создание бэкапа...',
+                text: 'Пожалуйста, подождите',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+            
+            fetch('/backup', {
+                method: 'POST'
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.blob();
+                }
+                throw new Error('Ошибка при создании бэкапа');
+            })
+            .then(blob => {
+                Swal.close();
+                
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `backup_${new Date().toISOString().slice(0,10)}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                Swal.fire({
+                    title: 'Успех!',
+                    text: 'Бэкап создан и скачан',
+                    icon: 'success',
+                    timer: 1500,
+                    showConfirmButton: false
+                });
+            })
+            .catch(error => {
+                Swal.close();
+                Swal.fire({
+                    title: 'Ошибка!',
+                    text: error.message,
+                    icon: 'error',
+                    confirmButtonText: 'OK'
+                });
+            });
+        }
+        
+        // Автоматическое скрытие алертов
+        setTimeout(function() {
+            $('.alert').fadeOut('slow');
+        }, 5000);
+    </script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

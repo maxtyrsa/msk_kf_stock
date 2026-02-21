@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block title %}Дашборд - Складской учет{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h2 class="mb-4"><i class="fas fa-tachometer-alt me-2"></i>Дашборд</h2>
+    
+    <!-- Статистика -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="stat-card text-center">
+                <i class="fas fa-boxes stat-icon mb-3"></i>
+                <h3>{{ total_products|default(0) }}</h3>
+                <p class="text-muted mb-0">Всего товаров</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card text-center">
+                <i class="fas fa-shopping-cart stat-icon mb-3"></i>
+                <h3>{{ total_orders|default(0) }}</h3>
+                <p class="text-muted mb-0">Всего заказов</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card text-center">
+                <i class="fas fa-cubes stat-icon mb-3"></i>
+                <h3>{{ total_stock_items|default(0) }}</h3>
+                <p class="text-muted mb-0">Единиц на складе</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card text-center">
+                <i class="fas fa-exclamation-triangle stat-icon mb-3" style="color: #dc3545;"></i>
+                <h3>{{ low_stock_count|default(0) }}</h3>
+                <p class="text-muted mb-0">Низкий запас</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Быстрые действия -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="fas fa-bolt me-2"></i>Быстрые действия</h5>
+                </div>
+                <div class="card-body">
+                    <button class="btn btn-success me-2 mb-2" data-bs-toggle="modal" data-bs-target="#addOperationModal">
+                        <i class="fas fa-plus-circle me-1"></i>Добавить операцию
+                    </button>
+                    <a href="{{ url_for('upload_pdf') }}" class="btn btn-primary me-2 mb-2">
+                        <i class="fas fa-file-pdf me-1"></i>Загрузить PDF
+                    </a>
+                    <a href="{{ url_for('inventory') }}" class="btn btn-warning me-2 mb-2">
+                        <i class="fas fa-clipboard-check me-1"></i>Инвентаризация
+                    </a>
+                    <a href="{{ url_for('reports') }}" class="btn btn-info me-2 mb-2">
+                        <i class="fas fa-chart-bar me-1"></i>Отчеты
+                    </a>
+                    <a href="{{ url_for('export_inventory') }}" class="btn btn-secondary me-2 mb-2">
+                        <i class="fas fa-download me-1"></i>Скачать бланк инвентаризации
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Последние операции -->
+    <div class="row">
+        <div class="col-12">
+            <div class="table-responsive">
+                <h4 class="mb-3"><i class="fas fa-history me-2"></i>Последние операции</h4>
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Тип</th>
+                            <th>Номер заказа</th>
+                            <th>Товар</th>
+                            <th>Артикул</th>
+                            <th>Количество</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if recent_orders and recent_orders|length > 0 %}
+                            {% for order in recent_orders %}
+                            <tr>
+                                <td>{{ order.Date|default('') }}</td>
+                                <td>
+                                    {% if order['Operation Type'] == 'Приход' %}
+                                    <span class="badge bg-success">Приход</span>
+                                    {% elif order['Operation Type'] == 'Расход' %}
+                                    <span class="badge bg-warning">Расход</span>
+                                    {% elif order['Operation Type'] == 'Инвентаризация' %}
+                                    <span class="badge bg-info">Инвентаризация</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">{{ order['Operation Type']|default('') }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ order['Order Number']|default('') }}</td>
+                                <td>{{ order['Product Name']|default('') }}</td>
+                                <td><code>{{ order['Product Article']|default('') }}</code></td>
+                                <td class="text-end"><strong>{{ order['Quantity']|default(0) }}</strong></td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center py-4">
+                                    <p class="text-muted mb-0">Нет операций</p>
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Товары с низким запасом -->
+    {% if products and products|length > 0 %}
+        {% set low_stock_products = [] %}
+        {% for product in products %}
+            {% if product.stock is defined and product.stock < 10 %}
+                {% set low_stock_products = low_stock_products.append(product) %}
+            {% endif %}
+        {% endfor %}
+        
+        {% if low_stock_products|length > 0 %}
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card border-warning">
+                    <div class="card-header bg-warning text-dark">
+                        <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Товары с низким запасом (менее 10 шт.)</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Артикул</th>
+                                        <th>Название</th>
+                                        <th>Остаток</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for product in low_stock_products %}
+                                    <tr>
+                                        <td><code>{{ product.article|default('') }}</code></td>
+                                        <td>{{ product.name|default('') }}</td>
+                                        <td><span class="badge bg-danger">{{ product.stock|default(0) }}</span></td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    {% endif %}
+</div>
+
+<script>
+    // Обновление статистики
+    function updateStats() {
+        fetch('/api/stats')
+            .then(response => response.json())
+            .then(data => {
+                console.log('Stats updated:', data);
+            })
+            .catch(error => console.error('Error updating stats:', error));
+    }
+    
+    setInterval(updateStats, 30000);
+</script>
+{% endblock %}

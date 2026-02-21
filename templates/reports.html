@@ -1,0 +1,397 @@
+{% extends "base.html" %}
+
+{% block title %}Отчеты - Складской учет{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h2 class="mb-4"><i class="fas fa-chart-bar me-2"></i>Генерация отчетов</h2>
+    
+    <div class="alert alert-info mb-4">
+        <i class="fas fa-info-circle me-2"></i>
+        <strong>Поддержка составных артикулов:</strong> В отчетах отображается статистика по составным артикулам.
+        <span class="badge bg-info ms-2">🧩 составной</span>
+    </div>
+    
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="fas fa-filter me-2"></i>Параметры отчета</h5>
+                </div>
+                <div class="card-body">
+                    <form id="reportForm">
+                        <div class="mb-3">
+                            <label for="startDate" class="form-label">Начальная дата</label>
+                            <input type="date" class="form-control" id="startDate" 
+                                   value="{{ now().strftime('%Y-%m-01') }}" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="endDate" class="form-label">Конечная дата</label>
+                            <input type="date" class="form-control" id="endDate" 
+                                   value="{{ now().strftime('%Y-%m-%d') }}" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="reportType" class="form-label">Тип отчета</label>
+                            <select class="form-select" id="reportType">
+                                <option value="all">Все операции</option>
+                                <option value="Приход">Только приходы</option>
+                                <option value="Расход">Только расходы</option>
+                                <option value="Инвентаризация">Только инвентаризация</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="productSearch" class="form-label">Товар (оставьте пустым для всех)</label>
+                            <input type="text" class="form-control" id="productSearch" 
+                                   placeholder="Введите артикул или название...">
+                            <div id="searchResults" class="list-group mt-2" style="max-height: 200px; overflow-y: auto;"></div>
+                        </div>
+                        
+                        <input type="hidden" id="selectedArticle">
+                        
+                        <button type="button" class="btn btn-primary w-100" onclick="generateReport()">
+                            <i class="fas fa-sync me-1"></i>Сформировать отчет
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-table me-2"></i>Результаты</h5>
+                    <div>
+                        <button class="btn btn-sm btn-light me-1" onclick="exportToExcel()" id="exportBtn" style="display: none;">
+                            <i class="fas fa-file-excel me-1"></i>Excel
+                        </button>
+                        <button class="btn btn-sm btn-light" onclick="printReport()" id="printBtn" style="display: none;">
+                            <i class="fas fa-print me-1"></i>Печать
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="reportResults">
+                        <div class="text-center py-5 text-muted">
+                            <i class="fas fa-chart-line fa-4x mb-3"></i>
+                            <p>Выберите параметры и сформируйте отчет</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно для детального просмотра -->
+<div class="modal fade" id="detailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Детальные операции</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="detailsModalBody">
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentReportData = { summary: [], detailed: [] };
+let compositeStats = { total: 0, orders: [] };
+
+// Поиск товаров
+let searchTimeout;
+document.getElementById('productSearch')?.addEventListener('input', function(e) {
+    clearTimeout(searchTimeout);
+    const query = e.target.value;
+    
+    if (query.length < 2) {
+        document.getElementById('searchResults').innerHTML = '';
+        return;
+    }
+    
+    searchTimeout = setTimeout(() => {
+        fetch('/products/search?q=' + encodeURIComponent(query))
+            .then(response => response.json())
+            .then(products => {
+                let html = '';
+                products.forEach(product => {
+                    const isComposite = product.article && product.article.includes('_');
+                    html += `<a href="#" class="list-group-item list-group-item-action" 
+                             onclick="selectProduct('${product.article}', '${product.name.replace(/'/g, "\\'")}')">
+                             <strong>${product.name}</strong>
+                             ${isComposite ? '<span class="badge bg-info ms-2">составной</span>' : ''}
+                             <br>
+                             <small>Арт. ${product.article} (остаток: ${product.stock})</small>
+                             </a>`;
+                });
+                document.getElementById('searchResults').innerHTML = html;
+            });
+    }, 300);
+});
+
+function selectProduct(article, name) {
+    document.getElementById('selectedArticle').value = article;
+    document.getElementById('productSearch').value = name;
+    document.getElementById('searchResults').innerHTML = '';
+}
+
+function generateReport() {
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    const reportType = document.getElementById('reportType').value;
+    const article = document.getElementById('selectedArticle').value;
+    
+    if (!startDate || !endDate) {
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Выберите период',
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+        return;
+    }
+    
+    document.getElementById('reportResults').innerHTML = `
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary mb-3" role="status">
+                <span class="visually-hidden">Загрузка...</span>
+            </div>
+            <p>Формирование отчета...</p>
+        </div>
+    `;
+    
+    fetch('/reports/generate', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            start_date: startDate,
+            end_date: endDate,
+            report_type: reportType,
+            article: article
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            currentReportData = data;
+            compositeStats = data.composite_stats || { total: 0, orders: [] };
+            displayReport(data.summary, data.detailed);
+        } else {
+            showError(data.error || 'Ошибка при генерации отчета');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showError('Ошибка при формировании отчета');
+    });
+}
+
+function displayReport(summary, detailed) {
+    if (!summary || summary.length === 0) {
+        document.getElementById('reportResults').innerHTML = `
+            <div class="text-center py-5 text-muted">
+                <i class="fas fa-info-circle fa-4x mb-3"></i>
+                <p>Нет данных за выбранный период</p>
+            </div>
+        `;
+        document.getElementById('exportBtn').style.display = 'none';
+        document.getElementById('printBtn').style.display = 'none';
+        return;
+    }
+    
+    document.getElementById('exportBtn').style.display = 'inline-block';
+    document.getElementById('printBtn').style.display = 'inline-block';
+    
+    let html = '<div class="table-responsive">';
+    
+    // Статистика по составным артикулам
+    if (compositeStats.total > 0) {
+        html += `
+            <div class="alert alert-info mb-3">
+                <i class="fas fa-puzzle-piece me-2"></i>
+                <strong>Статистика по составным артикулам:</strong>
+                Всего операций: ${compositeStats.total}, в заказах: ${compositeStats.orders.length}
+            </div>
+        `;
+    }
+    
+    html += '<table class="table table-hover">';
+    html += '<thead><tr><th>Артикул</th><th>Товар</th><th>Приход</th><th>Расход</th><th>Инвентаризация</th><th>Итог</th><th>Действия</th></tr></thead>';
+    html += '<tbody>';
+    
+    summary.forEach(item => {
+        const isComposite = item.is_composite ? '<span class="badge bg-info ms-2" title="Составной артикул">🧩</span>' : '';
+        
+        html += '<tr>';
+        html += '<td><code>' + (item.article || '---') + '</code> ' + isComposite + '</td>';
+        html += '<td>' + (item.name || '---') + '</td>';
+        html += '<td class="text-end">' + (item.total_in || 0) + '</td>';
+        html += '<td class="text-end">' + (item.total_out || 0) + '</td>';
+        html += '<td class="text-end">' + (item.inventory !== null && item.inventory !== undefined ? item.inventory : '-') + '</td>';
+        html += '<td class="text-end"><strong>' + (item.final_stock || 0) + '</strong></td>';
+        html += '<td>';
+        html += '<button class="btn btn-sm btn-info" onclick="showDetails(\'' + item.article + '\')">';
+        html += '<i class="fas fa-eye"></i>';
+        html += '</button>';
+        html += '</td>';
+        html += '</tr>';
+    });
+    
+    html += '</tbody></table>';
+    html += '</div>';
+    
+    // Итоги
+    let totalIn = summary.reduce((sum, item) => sum + (item.total_in || 0), 0);
+    let totalOut = summary.reduce((sum, item) => sum + (item.total_out || 0), 0);
+    let totalStock = summary.reduce((sum, item) => sum + (item.final_stock || 0), 0);
+    
+    html += '<div class="row mt-4">';
+    html += '<div class="col-md-4"><div class="card"><div class="card-body text-center">';
+    html += '<h6 class="text-muted">Всего приход</h6>';
+    html += '<h3 class="text-success">' + totalIn + '</h3>';
+    html += '</div></div></div>';
+    
+    html += '<div class="col-md-4"><div class="card"><div class="card-body text-center">';
+    html += '<h6 class="text-muted">Всего расход</h6>';
+    html += '<h3 class="text-danger">' + totalOut + '</h3>';
+    html += '</div></div></div>';
+    
+    html += '<div class="col-md-4"><div class="card"><div class="card-body text-center">';
+    html += '<h6 class="text-muted">Итоговый остаток</h6>';
+    html += '<h3 class="text-primary">' + totalStock + '</h3>';
+    html += '</div></div></div>';
+    html += '</div>';
+    
+    document.getElementById('reportResults').innerHTML = html;
+}
+
+function showDetails(article) {
+    if (!currentReportData.detailed) return;
+    
+    const operations = currentReportData.detailed.filter(op => op.article === article);
+    
+    if (operations.length === 0) return;
+    
+    let html = '<h6>Операции по товару ' + article + '</h6>';
+    html += '<table class="table table-sm">';
+    html += '<thead><tr><th>Дата</th><th>Тип</th><th>Заказ</th><th>Количество</th></tr></thead>';
+    html += '<tbody>';
+    
+    operations.forEach(op => {
+        let badgeClass = '';
+        if (op.type === 'Приход') badgeClass = 'success';
+        else if (op.type === 'Расход') badgeClass = 'warning';
+        else if (op.type === 'Инвентаризация') badgeClass = 'info';
+        else badgeClass = 'secondary';
+        
+        html += '<tr>';
+        html += '<td>' + op.date + '</td>';
+        html += '<td><span class="badge bg-' + badgeClass + '">' + op.type + '</span></td>';
+        html += '<td>' + op.order_number + '</td>';
+        html += '<td class="text-end">' + op.quantity + '</td>';
+        html += '</tr>';
+    });
+    
+    html += '</tbody></table>';
+    
+    document.getElementById('detailsModalBody').innerHTML = html;
+    new bootstrap.Modal(document.getElementById('detailsModal')).show();
+}
+
+function exportToExcel() {
+    if (!currentReportData.summary || currentReportData.summary.length === 0) return;
+    
+    let csv = "Артикул,Название,Приход,Расход,Инвентаризация,Итог,Тип\n";
+    
+    currentReportData.summary.forEach(item => {
+        const type = item.is_composite ? 'составной' : 'обычный';
+        csv += `"${item.article}","${item.name}",${item.total_in || 0},${item.total_out || 0},${item.inventory || ''},${item.final_stock || 0},"${type}"\n`;
+    });
+    
+    csv += "\n\nДетальные операции\n";
+    csv += "Дата,Тип,Номер заказа,Артикул,Название,Количество,Тип артикула\n";
+    
+    currentReportData.detailed.forEach(op => {
+        const articleType = op.is_composite ? 'составной' : 'обычный';
+        csv += `"${op.date}","${op.type}","${op.order_number}","${op.article}","${op.product_name}",${op.quantity},"${articleType}"\n`;
+    });
+    
+    const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `report_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function printReport() {
+    if (!currentReportData.summary || currentReportData.summary.length === 0) return;
+    
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+        <html>
+        <head>
+            <title>Отчет</title>
+            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+            <style>
+                body { padding: 20px; }
+                table { width: 100%; border-collapse: collapse; }
+                th { background: #f8f9fa; }
+                th, td { border: 1px solid #dee2e6; padding: 8px; text-align: left; }
+                .badge-composite { background: #6f42c1; color: white; padding: 2px 5px; border-radius: 3px; font-size: 0.7rem; }
+                @media print { .no-print { display: none; } }
+            </style>
+        </head>
+        <body>
+            <h2 class="mb-4">Отчет за период</h2>
+            <div id="printContent"></div>
+            <button class="btn btn-primary no-print mt-4" onclick="window.print()">Печать</button>
+            <button class="btn btn-secondary no-print mt-4 ms-2" onclick="window.close()">Закрыть</button>
+        </body>
+        </html>
+    `);
+    
+    let content = '<table class="table table-bordered">';
+    content += '<thead><tr><th>Артикул</th><th>Товар</th><th>Приход</th><th>Расход</th><th>Инвентаризация</th><th>Итог</th><th>Тип</th></tr></thead>';
+    content += '<tbody>';
+    
+    currentReportData.summary.forEach(item => {
+        const type = item.is_composite ? '<span class="badge-composite">составной</span>' : 'обычный';
+        content += `<tr>
+            <td>${item.article}</td>
+            <td>${item.name}</td>
+            <td>${item.total_in || 0}</td>
+            <td>${item.total_out || 0}</td>
+            <td>${item.inventory || '-'}</td>
+            <td><strong>${item.final_stock || 0}</strong></td>
+            <td>${type}</td>
+        </tr>`;
+    });
+    
+    content += '</tbody></table>';
+    
+    printWindow.document.getElementById('printContent').innerHTML = content;
+    printWindow.document.close();
+}
+
+function showError(message) {
+    document.getElementById('reportResults').innerHTML = `
+        <div class="text-center py-5 text-danger">
+            <i class="fas fa-exclamation-triangle fa-4x mb-3"></i>
+            <p>${message}</p>
+        </div>
+    `;
+    document.getElementById('exportBtn').style.display = 'none';
+    document.getElementById('printBtn').style.display = 'none';
+}
+</script>
+{% endblock %}

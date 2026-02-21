@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+
+{% block title %}Заказы - Складской учет{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h2 class="mb-4"><i class="fas fa-shopping-cart me-2"></i>Управление заказами</h2>
+    
+    <!-- Фильтры -->
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0"><i class="fas fa-filter me-2"></i>Фильтры</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">Начальная дата</label>
+                    <input type="date" class="form-control" id="startDate" 
+                           value="{{ thirty_days_ago if thirty_days_ago else '' }}">
+                </div>
+                
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">Конечная дата</label>
+                    <input type="date" class="form-control" id="endDate" 
+                           value="{{ today if today else '' }}">
+                </div>
+                
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">Тип операции</label>
+                    <select class="form-select" id="orderType">
+                        <option value="all">Все типы</option>
+                        <option value="Приход">Приход</option>
+                        <option value="Расход">Расход</option>
+                        <option value="Инвентаризация">Инвентаризация</option>
+                    </select>
+                </div>
+                
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">Поиск</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="searchInput" 
+                               placeholder="Номер заказа, товар...">
+                        <button class="btn btn-outline-secondary" type="button" onclick="applyFilters()">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-12">
+                    <button class="btn btn-primary" onclick="applyFilters()">
+                        <i class="fas fa-sync me-1"></i>Применить фильтры
+                    </button>
+                    <button class="btn btn-secondary" onclick="resetFilters()">
+                        <i class="fas fa-undo me-1"></i>Сбросить
+                    </button>
+                    <span class="float-end text-muted" id="filterStats"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Календарь -->
+    <div class="card mb-4">
+        <div class="card-header bg-info text-white">
+            <h5 class="mb-0"><i class="fas fa-calendar me-2"></i>Календарь заказов</h5>
+        </div>
+        <div class="card-body">
+            <div id="calendar" class="text-center text-muted">
+                <i class="fas fa-calendar-alt fa-3x mb-3"></i>
+                <p>Загрузка календаря...</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Таблица заказов -->
+    <div class="table-responsive">
+        <table class="table table-hover" id="ordersTable">
+            <thead>
+                <tr>
+                    <th>№ заказа</th>
+                    <th>Дата</th>
+                    <th>Тип</th>
+                    <th>Кол-во позиций</th>
+                    <th>Всего единиц</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody id="ordersTableBody">
+                {% for order in orders %}
+                <tr class="order-row">
+                    <td><strong>{{ order.number }}</strong></td>
+                    <td>{{ order.date }}</td>
+                    <td>
+                        {% if order.items and order.items[0] %}
+                            {% set type = order.items[0]['Operation Type'] %}
+                            {% if type == 'Приход' %}
+                                <span class="badge bg-success">Приход</span>
+                            {% elif type == 'Расход' %}
+                                <span class="badge bg-warning">Расход</span>
+                            {% elif type == 'Инвентаризация' %}
+                                <span class="badge bg-info">Инвентаризация</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ type }}</span>
+                            {% endif %}
+                        {% endif %}
+                    </td>
+                    <td>{{ order.total_items }}</td>
+                    <td>{{ order.total_quantity }}</td>
+                    <td>
+                        <a href="{{ url_for('order_detail', order_number=order.number) }}" class="btn btn-sm btn-info">
+                            <i class="fas fa-eye"></i>
+                        </a>
+                        <a href="{{ url_for('export_order', order_number=order.number) }}" class="btn btn-sm btn-success">
+                            <i class="fas fa-file-excel"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="text-center py-5">
+                        <i class="fas fa-box-open fa-4x text-muted mb-3"></i>
+                        <p class="text-muted">Нет заказов</p>
+                        <a href="{{ url_for('upload_pdf') }}" class="btn btn-primary">
+                            <i class="fas fa-upload me-1"></i>Загрузить заказы
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+// Глобальные переменные
+let currentOrders = [];
+
+// Функции для работы с фильтрами
+function applyFilters() {
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    const orderType = document.getElementById('orderType').value;
+    const search = document.getElementById('searchInput').value;
+    
+    // Валидация дат
+    if (!startDate || !endDate) {
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Выберите начальную и конечную даты',
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+        return;
+    }
+    
+    // Показываем загрузку
+    Swal.fire({
+        title: 'Фильтрация...',
+        text: 'Пожалуйста, подождите',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
+    
+    fetch('/orders/filter', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            start_date: startDate,
+            end_date: endDate,
+            type: orderType,
+            search: search
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        Swal.close();
+        
+        if (data.success) {
+            currentOrders = data.orders;
+            displayOrders(currentOrders);
+            document.getElementById('filterStats').innerHTML = 
+                `Найдено заказов: <strong>${data.total}</strong>, всего единиц: <strong>${data.total_quantity}</strong>`;
+        } else {
+            Swal.fire({
+                title: 'Ошибка!',
+                text: data.error || 'Ошибка при фильтрации',
+                icon: 'error',
+                confirmButtonText: 'OK'
+            });
+        }
+    })
+    .catch(error => {
+        Swal.close();
+        console.error('Error:', error);
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Ошибка при фильтрации: ' + error.message,
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+    });
+}
+
+function displayOrders(orders) {
+    const tbody = document.getElementById('ordersTableBody');
+    
+    if (!orders || orders.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center py-5">
+                    <i class="fas fa-box-open fa-4x text-muted mb-3"></i>
+                    <p class="text-muted">Нет заказов за выбранный период</p>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    let html = '';
+    
+    orders.forEach(order => {
+        let typeBadge = '';
+        if (order.type === 'Приход') {
+            typeBadge = '<span class="badge bg-success">Приход</span>';
+        } else if (order.type === 'Расход') {
+            typeBadge = '<span class="badge bg-warning">Расход</span>';
+        } else if (order.type === 'Инвентаризация') {
+            typeBadge = '<span class="badge bg-info">Инвентаризация</span>';
+        } else {
+            typeBadge = '<span class="badge bg-secondary">' + (order.type || 'Неизвестно') + '</span>';
+        }
+        
+        html += `
+            <tr>
+                <td><strong>${escapeHtml(order.number)}</strong></td>
+                <td>${escapeHtml(order.date)}</td>
+                <td>${typeBadge}</td>
+                <td>${order.total_items}</td>
+                <td>${order.total_quantity}</td>
+                <td>
+                    <a href="/order/${encodeURIComponent(order.number)}" class="btn btn-sm btn-info">
+                        <i class="fas fa-eye"></i>
+                    </a>
+                    <a href="/export/orders/${encodeURIComponent(order.number)}" class="btn btn-sm btn-success">
+                        <i class="fas fa-file-excel"></i>
+                    </a>
+                </td>
+            </tr>
+        `;
+    });
+    
+    tbody.innerHTML = html;
+}
+
+function resetFilters() {
+    // Сбрасываем на значения из URL или на пустые
+    document.getElementById('startDate').value = '{{ thirty_days_ago }}';
+    document.getElementById('endDate').value = '{{ today }}';
+    document.getElementById('orderType').value = 'all';
+    document.getElementById('searchInput').value = '';
+    applyFilters();
+}
+
+// Загрузка календаря
+function loadCalendar() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    
+    fetch(`/api/orders/calendar?year=${year}&month=${month}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                displayCalendar(data.data);
+            } else {
+                document.getElementById('calendar').innerHTML = `
+                    <div class="text-center text-muted">
+                        <i class="fas fa-calendar-alt fa-3x mb-3"></i>
+                        <p>Не удалось загрузить календарь</p>
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('Calendar error:', error);
+            document.getElementById('calendar').innerHTML = `
+                <div class="text-center text-muted">
+                    <i class="fas fa-calendar-alt fa-3x mb-3"></i>
+                    <p>Ошибка загрузки календаря</p>
+                </div>
+            `;
+        });
+}
+
+function displayCalendar(data) {
+    const calendarDiv = document.getElementById('calendar');
+    
+    if (!data || data.length === 0) {
+        calendarDiv.innerHTML = '<p class="text-center text-muted">Нет заказов в этом месяце</p>';
+        return;
+    }
+    
+    let html = '<div class="row">';
+    
+    // Группируем по неделям для лучшего отображения
+    data.sort((a, b) => a.date.localeCompare(b.date));
+    
+    data.forEach(day => {
+        if (day.total_orders > 0) {
+            html += `
+                <div class="col-md-3 col-6 mb-3">
+                    <div class="card bg-light h-100">
+                        <div class="card-body text-center p-2">
+                            <small class="text-muted">${day.date}</small>
+                            <h6 class="mt-2 mb-1">${day.total_orders} зак.</h6>
+                            <small>${day.total_items} ед.</small>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    });
+    
+    html += '</div>';
+    calendarDiv.innerHTML = html;
+}
+
+// Функция для экранирования HTML
+function escapeHtml(unsafe) {
+    if (!unsafe) return '';
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// Инициализация при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    loadCalendar();
+    
+    // Сохраняем исходные заказы
+    {% if orders %}
+    currentOrders = {{ orders|tojson|safe }};
+    {% endif %}
+    
+    // Применяем фильтры через небольшую задержку
+    setTimeout(applyFilters, 100);
+});
+</script>
+
+<style>
+#calendar .card {
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+    border: 1px solid #dee2e6;
+}
+
+#calendar .card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    border-color: #007bff;
+}
+
+#calendar .card:active {
+    transform: translateY(-1px);
+}
+
+.filter-active {
+    background-color: #e7f1ff;
+    border-color: #007bff;
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+.badge {
+    font-size: 0.9em;
+    padding: 0.5em 0.7em;
+}
+</style>
+{% endblock %}

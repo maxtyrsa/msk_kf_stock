@@ -1,0 +1,597 @@
+{% extends "base.html" %}
+
+{% block title %}Отчет по составным артикулам{% endblock %}
+
+{% block extra_css %}
+<style>
+    .search-section {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        border-radius: 10px;
+        margin-bottom: 30px;
+    }
+    
+    .part-badge {
+        display: inline-block;
+        background-color: #e9ecef;
+        border-radius: 20px;
+        padding: 5px 12px;
+        margin: 3px;
+        font-size: 0.85rem;
+        border-left: 4px solid #6f42c1;
+        transition: all 0.2s;
+        cursor: pointer;
+    }
+    
+    .part-badge:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+    
+    .part-badge.matching {
+        background-color: #cfe2ff;
+        border-left-color: #0d6efd;
+        font-weight: bold;
+    }
+    
+    .part-badge.exact-match {
+        background-color: #d1e7dd;
+        border-left-color: #198754;
+        font-weight: bold;
+    }
+    
+    .article-card {
+        border: none;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 15px;
+        transition: transform 0.2s;
+    }
+    
+    .article-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+    
+    .article-card .card-header {
+        background-color: #f8f9fa;
+        border-bottom: 2px solid #dee2e6;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    
+    .stats-card {
+        background: white;
+        border-radius: 10px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .stats-number {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #007bff;
+    }
+    
+    .part-cloud {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 10px;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    
+    .cloud-item {
+        padding: 8px 15px;
+        border-radius: 20px;
+        background: white;
+        border: 1px solid #dee2e6;
+        font-size: 0.9rem;
+        transition: all 0.2s;
+        cursor: pointer;
+    }
+    
+    .cloud-item:hover {
+        background: #007bff;
+        color: white;
+        transform: scale(1.05);
+    }
+    
+    .cloud-item.size-1 { font-size: 0.8rem; }
+    .cloud-item.size-2 { font-size: 1rem; }
+    .cloud-item.size-3 { font-size: 1.2rem; }
+    .cloud-item.size-4 { font-size: 1.4rem; }
+    .cloud-item.size-5 { font-size: 1.6rem; }
+    
+    .highlight {
+        background-color: #fff3cd;
+        font-weight: bold;
+        padding: 2px 4px;
+        border-radius: 3px;
+    }
+    
+    .filter-badge {
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .filter-badge.active {
+        background-color: #0d6efd;
+        color: white;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h2 class="mb-4">
+        <i class="fas fa-puzzle-piece me-2 text-primary"></i>
+        Отчет по составным артикулам
+    </h2>
+    
+    <!-- Секция поиска -->
+    <div class="search-section">
+        <h4 class="mb-4"><i class="fas fa-search me-2"></i>Поиск по части артикула</h4>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="input-group input-group-lg">
+                    <input type="text" class="form-control" id="searchPart" 
+                           placeholder="Например: 18.102wh или YTA-1010"
+                           value="{{ request.args.get('part', '') }}">
+                    <button class="btn btn-light" type="button" onclick="searchComposite()">
+                        <i class="fas fa-search me-1"></i>Найти
+                    </button>
+                </div>
+                <div class="text-white-50 mt-2">
+                    <small>Минимум 3 символа. Поиск по всем составным артикулам</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <input type="date" class="form-control form-control-lg" id="startDate" 
+                       value="{{ now().strftime('%Y-%m-01') }}">
+            </div>
+            <div class="col-md-3">
+                <input type="date" class="form-control form-control-lg" id="endDate" 
+                       value="{{ now().strftime('%Y-%m-%d') }}">
+            </div>
+        </div>
+    </div>
+    
+    <!-- Результаты -->
+    <div id="results" style="display: none;">
+        <!-- Статистика -->
+        <div class="row mb-4" id="summaryStats">
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <i class="fas fa-boxes fa-2x text-primary mb-2"></i>
+                    <div class="stats-number" id="statArticles">0</div>
+                    <div class="text-muted">Найдено артикулов</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <i class="fas fa-puzzle-piece fa-2x text-success mb-2"></i>
+                    <div class="stats-number" id="statParts">0</div>
+                    <div class="text-muted">Уникальных частей</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <i class="fas fa-arrow-down fa-2x text-danger mb-2"></i>
+                    <div class="stats-number" id="statOut">0</div>
+                    <div class="text-muted">Всего расход</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <i class="fas fa-arrow-up fa-2x text-success mb-2"></i>
+                    <div class="stats-number" id="statIn">0</div>
+                    <div class="text-muted">Всего приход</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Облако частей -->
+        <div class="card mb-4">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-cloud me-2"></i>
+                    Облако частей артикулов
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="part-cloud" id="partCloud"></div>
+                <p class="text-muted small mt-2">
+                    <i class="fas fa-info-circle me-1"></i>
+                    Нажмите на часть для фильтрации. Размер зависит от популярности.
+                </p>
+            </div>
+        </div>
+        
+        <!-- Список артикулов -->
+        <div class="card">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-list me-2"></i>
+                    Составные артикулы
+                </h5>
+                <div>
+                    <button class="btn btn-sm btn-light me-1" onclick="exportReport()">
+                        <i class="fas fa-file-excel me-1"></i>Excel
+                    </button>
+                    <button class="btn btn-sm btn-light" onclick="expandAll()">
+                        <i class="fas fa-expand me-1"></i>Развернуть все
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="articlesList"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="noResults" class="text-center py-5" style="display: none;">
+        <i class="fas fa-search fa-4x text-muted mb-3"></i>
+        <h5 class="text-muted">Введите часть артикула для поиска</h5>
+        <p class="text-muted">Например: 18.102wh, YTA-1010, diffuser</p>
+    </div>
+</div>
+
+<!-- Модальное окно деталей -->
+<div class="modal fade" id="detailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-history me-2"></i>
+                    Операции по товару
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="detailsContent">
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentData = null;
+let currentPart = '';
+
+function searchComposite() {
+    const part = document.getElementById('searchPart').value.trim();
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    
+    if (part.length < 3) {
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Введите минимум 3 символа',
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+        return;
+    }
+    
+    currentPart = part;
+    
+    Swal.fire({
+        title: 'Поиск...',
+        text: 'Пожалуйста, подождите',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
+    
+    fetch('/reports/composite', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            part: part,
+            start_date: startDate,
+            end_date: endDate
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        Swal.close();
+        
+        if (data.success) {
+            currentData = data;
+            displayResults(data);
+        } else {
+            Swal.fire({
+                title: 'Ошибка!',
+                text: data.error || 'Ошибка при поиске',
+                icon: 'error',
+                confirmButtonText: 'OK'
+            });
+        }
+    })
+    .catch(error => {
+        Swal.close();
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Ошибка при поиске: ' + error.message,
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+    });
+}
+
+function displayResults(data) {
+    document.getElementById('results').style.display = 'block';
+    document.getElementById('noResults').style.display = 'none';
+    
+    // Статистика
+    document.getElementById('statArticles').textContent = data.total_articles;
+    document.getElementById('statParts').textContent = data.summary.unique_parts;
+    document.getElementById('statIn').textContent = data.summary.total_in;
+    document.getElementById('statOut').textContent = data.summary.total_out;
+    
+    // Облако частей
+    displayPartCloud(data.parts_summary);
+    
+    // Список артикулов
+    displayArticles(data.stats);
+}
+
+function displayPartCloud(parts) {
+    const cloud = document.getElementById('partCloud');
+    
+    if (!parts || parts.length === 0) {
+        cloud.innerHTML = '<p class="text-muted text-center">Нет общих частей</p>';
+        return;
+    }
+    
+    // Находим максимальное количество для масштабирования
+    const maxCount = Math.max(...parts.map(p => p.count));
+    
+    let html = '';
+    parts.forEach(part => {
+        // Размер зависит от популярности
+        let sizeClass = 'size-1';
+        if (part.count > maxCount * 0.8) sizeClass = 'size-5';
+        else if (part.count > maxCount * 0.6) sizeClass = 'size-4';
+        else if (part.count > maxCount * 0.4) sizeClass = 'size-3';
+        else if (part.count > maxCount * 0.2) sizeClass = 'size-2';
+        
+        html += `
+            <span class="cloud-item ${sizeClass}" onclick="filterByPart('${escapeJs(part.part)}')">
+                ${escapeHtml(part.part)}
+                <span class="badge bg-secondary ms-1">${part.count}</span>
+            </span>
+        `;
+    });
+    
+    cloud.innerHTML = html;
+}
+
+function displayArticles(articles) {
+    const container = document.getElementById('articlesList');
+    let html = '';
+    
+    articles.forEach((article, index) => {
+        const hasMatching = article.part_positions && article.part_positions.length > 0;
+        const exactMatch = article.part_positions.some(p => p.full_match);
+        
+        let headerClass = 'bg-light';
+        if (exactMatch) headerClass = 'bg-success text-white';
+        else if (hasMatching) headerClass = 'bg-info text-white';
+        
+        html += `
+            <div class="card article-card">
+                <div class="card-header ${headerClass}" onclick="toggleArticle(${index})">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong><code>${escapeHtml(article.article)}</code></strong>
+                            ${article.is_composite ? '<span class="badge bg-primary ms-2">🧩 составной</span>' : ''}
+                            <br>
+                            <small>${escapeHtml(article.name)}</small>
+                        </div>
+                        <div>
+                            <span class="badge bg-white text-dark me-2">
+                                <i class="fas fa-cubes me-1"></i>${article.current_stock}
+                            </span>
+                            <span class="badge bg-warning me-2">
+                                <i class="fas fa-arrow-down me-1"></i>${article.total_out}
+                            </span>
+                            <i class="fas fa-chevron-down" id="chevron-${index}"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body" id="article-${index}" style="display: none;">
+        `;
+        
+        // Части артикула
+        html += '<div class="mb-3"><strong>Состав:</strong> ';
+        article.parts.forEach((part, i) => {
+            const isMatching = article.part_positions.some(p => p.index === i);
+            const isExact = article.part_positions.some(p => p.index === i && p.full_match);
+            
+            let partClass = 'part-badge';
+            if (isExact) partClass += ' exact-match';
+            else if (isMatching) partClass += ' matching';
+            
+            html += `<span class="${partClass}" onclick="filterByPart('${escapeJs(part)}')">${escapeHtml(part)}</span>`;
+        });
+        html += '</div>';
+        
+        // Информация о товаре
+        html += `
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <div class="alert alert-info mb-0 p-2">
+                        <small>Модель: ${escapeHtml(article.model) || '—'}</small>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="alert alert-success mb-0 p-2">
+                        <small>Текущий остаток: <strong>${article.current_stock}</strong></small>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="alert alert-warning mb-0 p-2">
+                        <small>Всего операций: <strong>${article.operations_count}</strong></small>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Последние операции
+        if (article.operations && article.operations.length > 0) {
+            html += '<h6>Последние операции:</h6>';
+            html += '<div class="table-responsive"><table class="table table-sm table-bordered">';
+            html += '<thead><tr><th>Дата</th><th>Тип</th><th>Заказ</th><th>Кол-во</th></tr></thead>';
+            html += '<tbody>';
+            
+            article.operations.slice(0, 5).forEach(op => {
+                let badgeClass = op.type === 'Приход' ? 'success' : (op.type === 'Расход' ? 'warning' : 'info');
+                html += `<tr>
+                    <td>${op.date}</td>
+                    <td><span class="badge bg-${badgeClass}">${op.type}</span></td>
+                    <td>${op.order_number}</td>
+                    <td class="text-end">${op.quantity}</td>
+                </tr>`;
+            });
+            
+            if (article.operations.length > 5) {
+                html += `<tr><td colspan="4" class="text-center text-muted">
+                    ... и еще ${article.operations.length - 5} операций
+                </td></tr>`;
+            }
+            
+            html += '</tbody></table></div>';
+            
+            html += `<button class="btn btn-sm btn-info" onclick="showAllOperations(${index})">
+                <i class="fas fa-eye me-1"></i>Показать все операции
+            </button>`;
+        } else {
+            html += '<p class="text-muted">Нет операций за выбранный период</p>';
+        }
+        
+        html += '</div></div>';
+    });
+    
+    container.innerHTML = html;
+}
+
+function toggleArticle(index) {
+    const content = document.getElementById(`article-${index}`);
+    const chevron = document.getElementById(`chevron-${index}`);
+    
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        chevron.className = 'fas fa-chevron-up';
+    } else {
+        content.style.display = 'none';
+        chevron.className = 'fas fa-chevron-down';
+    }
+}
+
+function expandAll() {
+    if (!currentData) return;
+    
+    currentData.stats.forEach((_, index) => {
+        const content = document.getElementById(`article-${index}`);
+        const chevron = document.getElementById(`chevron-${index}`);
+        if (content) {
+            content.style.display = 'block';
+            chevron.className = 'fas fa-chevron-up';
+        }
+    });
+}
+
+function filterByPart(part) {
+    document.getElementById('searchPart').value = part;
+    searchComposite();
+}
+
+function showAllOperations(index) {
+    if (!currentData) return;
+    
+    const article = currentData.stats[index];
+    
+    let html = `<h6>Артикул: <code>${escapeHtml(article.article)}</code></h6>`;
+    html += '<table class="table table-sm table-bordered">';
+    html += '<thead><tr><th>Дата</th><th>Тип</th><th>Заказ</th><th>Количество</th></tr></thead>';
+    html += '<tbody>';
+    
+    article.operations.forEach(op => {
+        let badgeClass = op.type === 'Приход' ? 'success' : (op.type === 'Расход' ? 'warning' : 'info');
+        html += `<tr>
+            <td>${op.date}</td>
+            <td><span class="badge bg-${badgeClass}">${op.type}</span></td>
+            <td>${op.order_number}</td>
+            <td class="text-end">${op.quantity}</td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table>';
+    
+    document.getElementById('detailsContent').innerHTML = html;
+    new bootstrap.Modal(document.getElementById('detailsModal')).show();
+}
+
+function exportReport() {
+    if (!currentData) return;
+    
+    let csv = "Артикул,Название,Модель,Текущий остаток,Всего приход,Всего расход,Части\n";
+    
+    currentData.stats.forEach(article => {
+        const parts = article.parts.join(' | ');
+        csv += `"${article.article}","${article.name}","${article.model}",${article.current_stock},${article.total_in},${article.total_out},"${parts}"\n`;
+    });
+    
+    csv += "\n\nСтатистика по частям\n";
+    csv += "Часть,Количество артикулов,Общий остаток,Общий расход\n";
+    
+    currentData.parts_summary.forEach(part => {
+        csv += `"${part.part}",${part.count},${part.total_stock},${part.total_out}\n`;
+    });
+    
+    const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `composite_report_${currentPart}_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function escapeHtml(unsafe) {
+    if (!unsafe) return '';
+    return String(unsafe)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+function escapeJs(str) {
+    return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+// Автопоиск при загрузке
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const part = urlParams.get('part');
+    if (part) {
+        document.getElementById('searchPart').value = part;
+        searchComposite();
+    } else {
+        document.getElementById('noResults').style.display = 'block';
+    }
+});
+</script>
+{% endblock %}

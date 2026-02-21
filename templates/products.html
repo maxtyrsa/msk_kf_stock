@@ -1,0 +1,781 @@
+{% extends "base.html" %}
+
+{% block title %}Товары - Складской учет{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="fas fa-boxes me-2"></i>Управление товарами</h2>
+        <div>
+            <!-- Выпадающее меню для загрузки -->
+            <div class="btn-group me-2">
+                <button type="button" class="btn btn-success dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="fas fa-download me-1"></i>Загрузить из файла
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('upload_products') }}">
+                            <i class="fas fa-sync me-2 text-primary"></i>Загрузить (новые + обновление)
+                        </a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('upload_new_products') }}">
+                            <i class="fas fa-plus-circle me-2 text-success"></i>Только новые товары
+                        </a>
+                    </li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('download_template') }}">
+                            <i class="fas fa-file-excel me-2 text-info"></i>Скачать шаблон
+                        </a>
+                    </li>
+                </ul>
+            </div>
+            
+            <!-- Кнопка скачивания бланка инвентаризации -->
+            <a href="{{ url_for('export_inventory') }}" class="btn btn-info me-2">
+                <i class="fas fa-download me-1"></i>Скачать бланк
+            </a>
+            
+            <!-- Кнопка добавления товара -->
+            <button class="btn btn-primary" onclick="showAddProductModal()">
+                <i class="fas fa-plus me-1"></i>Добавить товар
+            </button>
+        </div>
+    </div>
+    
+    <!-- Поиск и фильтры -->
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <div class="input-group">
+                <span class="input-group-text"><i class="fas fa-search"></i></span>
+                <input type="text" id="searchInput" class="form-control" placeholder="Поиск по названию, артикулу или модели...">
+                <button class="btn btn-outline-secondary" type="button" onclick="clearSearch()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+        <div class="col-md-4 text-end">
+            <div class="btn-group" role="group">
+                <button class="btn btn-outline-secondary" onclick="filterLowStock()">
+                    <i class="fas fa-exclamation-triangle me-1"></i>Низкий запас
+                </button>
+                <button class="btn btn-outline-secondary" onclick="resetFilters()">
+                    <i class="fas fa-undo me-1"></i>Сброс
+                </button>
+            </div>
+            <span class="text-muted ms-2">
+                Всего товаров: <strong id="totalProducts">{{ products|length }}</strong>
+            </span>
+        </div>
+    </div>
+    
+    <!-- Статистика -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h6 class="card-title">Всего товаров</h6>
+                    <h3 class="mb-0">{{ products|length }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h6 class="card-title">В наличии</h6>
+                    <h3 class="mb-0" id="inStockCount">
+                        {{ products|selectattr('stock', 'gt', 0)|list|length }}
+                    </h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-dark">
+                <div class="card-body">
+                    <h6 class="card-title">Низкий запас (<10)</h6>
+                    <h3 class="mb-0" id="lowStockCount">
+                        {{ products|selectattr('stock', 'lt', 10)|list|length }}
+                    </h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-danger text-white">
+                <div class="card-body">
+                    <h6 class="card-title">Нет в наличии</h6>
+                    <h3 class="mb-0" id="outOfStockCount">
+                        {{ products|selectattr('stock', 'eq', 0)|list|length }}
+                    </h3>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Таблица товаров -->
+    <div class="table-responsive">
+        <table class="table table-hover" id="productsTable">
+            <thead class="table-light">
+                <tr>
+                    <th>№</th>
+                    <th>Название товара</th>
+                    <th>Артикул</th>
+                    <th>Модель</th>
+                    <th>Остаток</th>
+                    <th>Статус</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody id="productsTableBody">
+                {% for product in products %}
+                <tr class="product-row" data-article="{{ product.article }}" data-name="{{ product.name }}" data-stock="{{ product.stock }}">
+                    <td>{{ loop.index }}</td>
+                    <td class="product-name">{{ product.name }}</td>
+                    <td><code class="product-article">{{ product.article }}</code></td>
+                    <td class="product-model">{{ product.model|default('') }}</td>
+                    <td>
+                        <span class="badge {% if product.stock < 10 %}bg-danger{% elif product.stock == 0 %}bg-secondary{% else %}bg-success{% endif %} fs-6 stock-badge">
+                            {{ product.stock }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if product.stock < 10 and product.stock > 0 %}
+                        <span class="badge bg-warning text-dark">⚠️ Низкий запас</span>
+                        {% elif product.stock == 0 %}
+                        <span class="badge bg-secondary">❌ Нет в наличии</span>
+                        {% else %}
+                        <span class="badge bg-success">✅ В наличии</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-sm btn-info" onclick="editProduct('{{ product.article }}')" title="Редактировать">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-warning" onclick="showProductDetails('{{ product.article }}')" title="Просмотр">
+                                <i class="fas fa-info-circle"></i>
+                            </button>
+                            <button class="btn btn-sm btn-success" onclick="addOperation('{{ product.article }}', '{{ product.name }}', {{ product.stock }})" title="Добавить операцию">
+                                <i class="fas fa-plus-circle"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteProduct('{{ product.article }}')" title="Удалить">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center py-5">
+                        <i class="fas fa-box-open fa-4x text-muted mb-3"></i>
+                        <h5 class="text-muted">Нет товаров</h5>
+                        <button class="btn btn-primary mt-3" onclick="showAddProductModal()">
+                            <i class="fas fa-plus me-1"></i>Добавить первый товар
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Модальное окно добавления/редактирования товара -->
+<div class="modal fade" id="productModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="modalTitle">
+                    <i class="fas fa-box me-2"></i>
+                    <span id="modalTitleText">Добавить товар</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="productForm">
+                    <input type="hidden" id="oldArticle">
+                    
+                    <div class="mb-3">
+                        <label class="form-label">
+                            Название товара <span class="text-danger">*</span>
+                        </label>
+                        <input type="text" class="form-control" id="productName" 
+                               placeholder="Введите название товара" required autocomplete="off">
+                        <div class="form-text text-muted">
+                            Например: Смартфон Xiaomi Redmi Note 10
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">
+                            Артикул <span class="text-danger">*</span>
+                        </label>
+                        <input type="text" class="form-control" id="productArticle" 
+                               placeholder="Введите артикул" required autocomplete="off">
+                        <div class="form-text text-muted">
+                            Уникальный идентификатор. Например: XIAOMI-RN10
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Модель</label>
+                        <input type="text" class="form-control" id="productModel" 
+                               placeholder="Введите модель (необязательно)">
+                        <div class="form-text text-muted">
+                            Например: Redmi Note 10
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3" id="currentStockField" style="display: none;">
+                        <label class="form-label">Текущий остаток</label>
+                        <input type="number" class="form-control" id="currentStock" readonly disabled>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times me-1"></i>Отмена
+                </button>
+                <button type="button" class="btn btn-primary" onclick="saveProduct()" id="saveProductBtn">
+                    <i class="fas fa-save me-1"></i>Сохранить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно деталей товара -->
+<div class="modal fade" id="productDetailsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-info-circle me-2"></i>
+                    Детали товара
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <table class="table table-bordered">
+                    <tr>
+                        <th style="width: 40%;">Название:</th>
+                        <td id="detailName" class="fw-bold"></td>
+                    </tr>
+                    <tr>
+                        <th>Артикул:</th>
+                        <td><code id="detailArticle"></code></td>
+                    </tr>
+                    <tr>
+                        <th>Модель:</th>
+                        <td id="detailModel"></td>
+                    </tr>
+                    <tr>
+                        <th>Текущий остаток:</th>
+                        <td>
+                            <span class="badge bg-primary fs-6" id="detailStock"></span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Статус:</th>
+                        <td id="detailStatus"></td>
+                    </tr>
+                    <tr>
+                        <th>Дата создания:</th>
+                        <td id="detailCreated">{{ now().strftime('%d.%m.%Y') }}</td>
+                    </tr>
+                </table>
+                
+                <div class="mt-3">
+                    <h6 class="fw-bold">Быстрые действия:</h6>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-sm btn-success" onclick="addOperationFromDetails()" id="detailOperationBtn">
+                            <i class="fas fa-plus-circle me-1"></i>Добавить операцию
+                        </button>
+                        <button class="btn btn-sm btn-warning" onclick="editFromDetails()" id="detailEditBtn">
+                            <i class="fas fa-edit me-1"></i>Редактировать
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times me-1"></i>Закрыть
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно подтверждения удаления -->
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Подтверждение удаления
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="fw-bold" id="deleteProductName"></p>
+                <p class="text-muted">Вы уверены, что хотите удалить этот товар?</p>
+                <div class="alert alert-warning">
+                    <i class="fas fa-info-circle me-2"></i>
+                    Внимание: удаление товара также удалит его остатки, но история операций сохранится.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times me-1"></i>Отмена
+                </button>
+                <button type="button" class="btn btn-danger" onclick="confirmDelete()">
+                    <i class="fas fa-trash me-1"></i>Удалить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Глобальные переменные
+let currentDeleteArticle = null;
+let currentDetailArticle = null;
+let searchTimeout;
+
+// Поиск с задержкой
+document.getElementById('searchInput').addEventListener('keyup', function() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(filterProducts, 300);
+});
+
+function filterProducts() {
+    const searchText = document.getElementById('searchInput').value.toLowerCase().trim();
+    const rows = document.querySelectorAll('.product-row');
+    let visibleCount = 0;
+    
+    rows.forEach(row => {
+        const name = row.querySelector('.product-name').textContent.toLowerCase();
+        const article = row.querySelector('.product-article').textContent.toLowerCase();
+        const model = row.querySelector('.product-model')?.textContent.toLowerCase() || '';
+        
+        if (name.includes(searchText) || article.includes(searchText) || model.includes(searchText)) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+    
+    // Обновляем счетчик видимых товаров
+    document.getElementById('totalProducts').textContent = visibleCount;
+}
+
+function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    filterProducts();
+}
+
+function filterLowStock() {
+    const rows = document.querySelectorAll('.product-row');
+    let visibleCount = 0;
+    
+    rows.forEach(row => {
+        const stock = parseInt(row.dataset.stock);
+        if (stock < 10) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+    
+    document.getElementById('searchInput').value = '';
+    document.getElementById('totalProducts').textContent = visibleCount;
+}
+
+function resetFilters() {
+    document.getElementById('searchInput').value = '';
+    const rows = document.querySelectorAll('.product-row');
+    rows.forEach(row => row.style.display = '');
+    document.getElementById('totalProducts').textContent = rows.length;
+}
+
+// Функции для работы с модальным окном товара
+function showAddProductModal() {
+    document.getElementById('modalTitleText').textContent = 'Добавить товар';
+    document.getElementById('productForm').reset();
+    document.getElementById('oldArticle').value = '';
+    document.getElementById('currentStockField').style.display = 'none';
+    document.getElementById('saveProductBtn').innerHTML = '<i class="fas fa-save me-1"></i>Сохранить';
+    
+    new bootstrap.Modal(document.getElementById('productModal')).show();
+}
+
+function editProduct(article) {
+    const row = document.querySelector(`.product-row[data-article="${article}"]`);
+    const name = row.querySelector('.product-name').textContent;
+    const model = row.querySelector('.product-model')?.textContent || '';
+    const stock = row.querySelector('.stock-badge').textContent;
+    
+    document.getElementById('modalTitleText').textContent = 'Редактировать товар';
+    document.getElementById('productName').value = name;
+    document.getElementById('productArticle').value = article;
+    document.getElementById('productModel').value = model;
+    document.getElementById('oldArticle').value = article;
+    document.getElementById('currentStock').value = stock;
+    document.getElementById('currentStockField').style.display = 'block';
+    document.getElementById('saveProductBtn').innerHTML = '<i class="fas fa-save me-1"></i>Обновить';
+    
+    new bootstrap.Modal(document.getElementById('productModal')).show();
+}
+
+function saveProduct() {
+    const name = document.getElementById('productName').value.trim();
+    const article = document.getElementById('productArticle').value.trim();
+    const model = document.getElementById('productModel').value.trim();
+    const oldArticle = document.getElementById('oldArticle').value;
+    
+    if (!name || !article) {
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Заполните обязательные поля',
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+        return;
+    }
+    
+    // Валидация артикула
+    if (!/^[A-Za-zА-Яа-я0-9\-\.\s]+$/.test(article)) {
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Артикул содержит недопустимые символы. Разрешены: буквы, цифры, дефис, точка, пробел',
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+        return;
+    }
+    
+    const url = oldArticle ? '/products/edit' : '/products/add';
+    const data = { 
+        name: name, 
+        article: article, 
+        model: model,
+        old_article: oldArticle 
+    };
+    
+    // Показываем загрузку
+    Swal.fire({
+        title: 'Сохранение...',
+        text: 'Пожалуйста, подождите',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
+    
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        Swal.close();
+        
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
+            Swal.fire({
+                title: 'Успех!',
+                text: oldArticle ? 'Товар обновлен' : 'Товар добавлен',
+                icon: 'success',
+                timer: 1500,
+                showConfirmButton: false
+            }).then(() => {
+                location.reload();
+            });
+        } else {
+            Swal.fire({
+                title: 'Ошибка!',
+                text: data.error || 'Ошибка при сохранении',
+                icon: 'error',
+                confirmButtonText: 'OK'
+            });
+        }
+    })
+    .catch(error => {
+        Swal.close();
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Ошибка при сохранении: ' + error.message,
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+    });
+}
+
+// Функции для просмотра деталей
+function showProductDetails(article) {
+    const row = document.querySelector(`.product-row[data-article="${article}"]`);
+    const name = row.querySelector('.product-name').textContent;
+    const model = row.querySelector('.product-model')?.textContent || 'Не указана';
+    const stock = row.querySelector('.stock-badge').textContent;
+    const status = row.querySelector('td:nth-child(6) .badge').textContent;
+    
+    currentDetailArticle = article;
+    
+    document.getElementById('detailName').textContent = name;
+    document.getElementById('detailArticle').textContent = article;
+    document.getElementById('detailModel').textContent = model;
+    document.getElementById('detailStock').textContent = stock;
+    document.getElementById('detailStatus').textContent = status;
+    
+    new bootstrap.Modal(document.getElementById('productDetailsModal')).show();
+}
+
+function addOperationFromDetails() {
+    if (!currentDetailArticle) return;
+    
+    const modal = bootstrap.Modal.getInstance(document.getElementById('productDetailsModal'));
+    modal.hide();
+    
+    // Заполняем форму операции
+    setTimeout(() => {
+        document.getElementById('articleInput').value = currentDetailArticle;
+        checkProduct();
+    }, 500);
+}
+
+function editFromDetails() {
+    if (!currentDetailArticle) return;
+    
+    const modal = bootstrap.Modal.getInstance(document.getElementById('productDetailsModal'));
+    modal.hide();
+    
+    setTimeout(() => {
+        editProduct(currentDetailArticle);
+    }, 500);
+}
+
+// Функция для добавления операции
+function addOperation(article, name, stock) {
+    document.getElementById('articleInput').value = article;
+    checkProduct();
+    
+    // Прокручиваем к модальному окну операции
+    const operationModal = new bootstrap.Modal(document.getElementById('addOperationModal'));
+    operationModal.show();
+}
+
+// Функция для удаления товара
+function deleteProduct(article) {
+    const row = document.querySelector(`.product-row[data-article="${article}"]`);
+    const name = row.querySelector('.product-name').textContent;
+    
+    currentDeleteArticle = article;
+    document.getElementById('deleteProductName').textContent = `Товар: ${name} (арт. ${article})`;
+    
+    new bootstrap.Modal(document.getElementById('deleteConfirmModal')).show();
+}
+
+function confirmDelete() {
+    if (!currentDeleteArticle) return;
+    
+    const modal = bootstrap.Modal.getInstance(document.getElementById('deleteConfirmModal'));
+    modal.hide();
+    
+    Swal.fire({
+        title: 'Удаление...',
+        text: 'Пожалуйста, подождите',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
+    
+    fetch('/products/delete/' + currentDeleteArticle, { 
+        method: 'POST' 
+    })
+    .then(response => response.json())
+    .then(data => {
+        Swal.close();
+        
+        if (data.success) {
+            Swal.fire({
+                title: 'Успех!',
+                text: 'Товар удален',
+                icon: 'success',
+                timer: 1500,
+                showConfirmButton: false
+            }).then(() => {
+                location.reload();
+            });
+        } else {
+            Swal.fire({
+                title: 'Ошибка!',
+                text: data.error || 'Ошибка при удалении',
+                icon: 'error',
+                confirmButtonText: 'OK'
+            });
+        }
+    })
+    .catch(error => {
+        Swal.close();
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Ошибка при удалении: ' + error.message,
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+    });
+}
+
+// Инициализация при загрузке
+document.addEventListener('DOMContentLoaded', function() {
+    // Добавляем подсказки для кнопок
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function(tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+    
+    // Обновляем статистику
+    updateStats();
+});
+
+// Функция для обновления статистики
+function updateStats() {
+    fetch('/api/stats')
+        .then(response => response.json())
+        .then(data => {
+            if (data.low_stock !== undefined) {
+                document.getElementById('lowStockCount').textContent = data.low_stock;
+            }
+        })
+        .catch(error => console.error('Error updating stats:', error));
+}
+
+// Обновляем статистику каждые 30 секунд
+setInterval(updateStats, 30000);
+
+// Функция для экспорта в CSV
+function exportToCSV() {
+    const rows = [];
+    const headers = ['Название', 'Артикул', 'Модель', 'Остаток'];
+    rows.push(headers);
+    
+    document.querySelectorAll('.product-row').forEach(row => {
+        const name = row.querySelector('.product-name').textContent;
+        const article = row.querySelector('.product-article').textContent;
+        const model = row.querySelector('.product-model')?.textContent || '';
+        const stock = row.querySelector('.stock-badge').textContent;
+        
+        rows.push([name, article, model, stock]);
+    });
+    
+    let csv = rows.map(row => 
+        row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')
+    ).join('\n');
+    
+    // Добавляем BOM для UTF-8
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', `products_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+</script>
+
+<style>
+/* Дополнительные стили */
+.product-row {
+    transition: background-color 0.2s;
+}
+
+.product-row:hover {
+    background-color: #f8f9fa;
+}
+
+.btn-group .btn {
+    margin: 0 2px;
+}
+
+.dropdown-menu {
+    box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.15);
+}
+
+.dropdown-item i {
+    width: 20px;
+}
+
+.card {
+    transition: transform 0.2s;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.badge {
+    padding: 0.5em 0.7em;
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+.modal-content {
+    border: none;
+    border-radius: 15px;
+}
+
+.modal-header {
+    border-radius: 15px 15px 0 0;
+}
+
+.modal-footer {
+    border-top: 1px solid #dee2e6;
+}
+
+/* Анимации */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.modal.fade .modal-dialog {
+    animation: fadeIn 0.3s;
+}
+
+/* Стили для статусов */
+.badge.bg-success {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+}
+
+.badge.bg-warning {
+    background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+}
+
+.badge.bg-danger {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+}
+
+.badge.bg-secondary {
+    background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+}
+
+.badge.bg-info {
+    background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+}
+
+.badge.bg-primary {
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+}
+</style>
+{% endblock %}

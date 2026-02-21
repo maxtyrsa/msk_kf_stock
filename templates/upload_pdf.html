@@ -1,0 +1,1108 @@
+{% extends "base.html" %}
+
+{% block title %}Загрузка Ozon - Складской учет{% endblock %}
+
+{% block extra_css %}
+<style>
+    .upload-area {
+        border: 2px dashed #dee2e6;
+        border-radius: 10px;
+        padding: 40px;
+        text-align: center;
+        background: #f8f9fa;
+        cursor: pointer;
+        transition: all 0.3s;
+    }
+    
+    .upload-area:hover {
+        border-color: #0054A5;
+        background: #e7f1ff;
+    }
+    
+    .upload-area.dragover {
+        border-color: #28a745;
+        background: #d4edda;
+    }
+    
+    .file-info {
+        margin-top: 15px;
+        padding: 10px;
+        background: white;
+        border-radius: 5px;
+        display: none;
+    }
+    
+    .badge-ozon {
+        background-color: #0054A5;
+        color: white;
+    }
+    
+    .composite-badge {
+        background-color: #6f42c1;
+        color: white;
+    }
+    
+    .search-results {
+        max-height: 300px;
+        overflow-y: auto;
+        border: 1px solid #dee2e6;
+        border-radius: 5px;
+        margin-top: 10px;
+    }
+    
+    .search-result-item {
+        padding: 10px;
+        border-bottom: 1px solid #dee2e6;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+    
+    .search-result-item:hover {
+        background-color: #f8f9fa;
+    }
+    
+    .search-result-item:last-child {
+        border-bottom: none;
+    }
+    
+    .diagnostic-output {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 5px;
+        padding: 10px;
+        font-family: monospace;
+        font-size: 12px;
+        max-height: 300px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+    }
+    
+    .product-found {
+        color: #28a745;
+        font-weight: bold;
+    }
+    
+    .product-not-found {
+        color: #dc3545;
+        font-weight: bold;
+    }
+    
+    .product-partial {
+        color: #ffc107;
+        font-weight: bold;
+    }
+    
+    .progress {
+        height: 20px;
+    }
+    
+    .table-responsive {
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    
+    .composite-parts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-top: 5px;
+    }
+    
+    .composite-part {
+        background-color: #e9ecef;
+        border-radius: 3px;
+        padding: 2px 8px;
+        font-size: 0.85rem;
+        border-left: 3px solid #6f42c1;
+    }
+    
+    .composite-part.found {
+        border-left-color: #28a745;
+        background-color: #d4edda;
+    }
+    
+    .composite-part.not-found {
+        border-left-color: #dc3545;
+        background-color: #f8d7da;
+    }
+    
+    .calculation-badge {
+        background-color: #17a2b8;
+        color: white;
+        font-size: 0.85rem;
+        padding: 3px 8px;
+        border-radius: 12px;
+        display: inline-block;
+    }
+    
+    .stats-card {
+        background: white;
+        border-radius: 10px;
+        padding: 15px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .stats-number {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #007bff;
+    }
+    
+    .product-tooltip {
+        position: relative;
+        display: inline-block;
+        cursor: help;
+    }
+    
+    .product-tooltip .tooltip-text {
+        visibility: hidden;
+        width: 300px;
+        background-color: #333;
+        color: #fff;
+        text-align: left;
+        border-radius: 6px;
+        padding: 10px;
+        position: absolute;
+        z-index: 1;
+        bottom: 125%;
+        left: 50%;
+        margin-left: -150px;
+        opacity: 0;
+        transition: opacity 0.3s;
+        font-size: 0.9rem;
+        white-space: normal;
+        word-wrap: break-word;
+    }
+    
+    .product-tooltip:hover .tooltip-text {
+        visibility: visible;
+        opacity: 1;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h2 class="mb-4">
+        <i class="fas fa-file-excel me-2" style="color: #0054A5;"></i>
+        Загрузка заказов Ozon
+    </h2>
+    
+    <div class="alert alert-info mb-4">
+        <i class="fas fa-info-circle me-2"></i>
+        <strong>Автоматический расчет количества!</strong><br>
+        Система автоматически извлекает количество из названия товара (например, "10 штук" → 10) 
+        и умножает на количество упаковок из колонки "Количество".
+        <div class="mt-2">
+            <span class="badge bg-success me-1">Найдено в базе</span>
+            <span class="badge bg-warning me-1">Будет создано</span>
+            <span class="badge bg-info me-1">Составной артикул</span>
+            <span class="badge bg-secondary me-1">Расчет количества</span>
+        </div>
+    </div>
+    
+    <div class="row">
+        <div class="col-md-8">
+            <!-- Карточка загрузки -->
+            <div class="card mb-4">
+                <div class="card-header" style="background-color: #0054A5; color: white;">
+                    <h5 class="mb-0"><i class="fas fa-upload me-2"></i>Загрузить Excel файл с заказами Ozon</h5>
+                </div>
+                <div class="card-body">
+                    <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+                        <i class="fas fa-cloud-upload-alt fa-4x text-muted mb-3"></i>
+                        <h5>Перетащите файл сюда или нажмите для выбора</h5>
+                        <p class="text-muted">Поддерживаются форматы: Excel (.xlsx, .xls)</p>
+                        <input type="file" id="fileInput" accept=".xlsx,.xls" style="display: none;">
+                    </div>
+                    
+                    <div class="file-info alert alert-success" id="fileInfo">
+                        <i class="fas fa-file-excel me-2"></i>
+                        <span id="fileName"></span>
+                        <button class="btn btn-sm btn-outline-danger float-end" onclick="clearFile()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="text-center mt-3">
+                        <button class="btn btn-primary btn-lg" onclick="uploadFile()" id="uploadBtn" disabled>
+                            <i class="fas fa-upload me-2"></i>Загрузить и обработать
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Прогресс загрузки -->
+            <div id="progressCard" class="card mb-4" style="display: none;">
+                <div class="card-body">
+                    <h5><i class="fas fa-spinner fa-spin me-2"></i>Обработка файла...</h5>
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                             role="progressbar" style="width: 100%"></div>
+                    </div>
+                    <p class="text-center mt-2" id="progressMessage">Чтение данных...</p>
+                </div>
+            </div>
+            
+            <!-- Результаты -->
+            <div id="results" class="mt-4" style="display: none;">
+                <div class="card">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="fas fa-list me-2"></i>Результаты обработки</h5>
+                        <div>
+                            <span class="badge bg-light text-dark me-2" id="statsTotal">0 заказов</span>
+                            <button class="btn btn-sm btn-light" onclick="loadAllOrders()" id="loadAllBtn">
+                                <i class="fas fa-download me-1"></i>Загрузить все
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="ordersList"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="error" class="mt-4" style="display: none;">
+                <div class="alert alert-danger" id="errorMessage"></div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <!-- Инструкция -->
+            <div class="card mb-4">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i>Инструкция</h5>
+                </div>
+                <div class="card-body">
+                    <h6>Как работает расчет количества:</h6>
+                    <ul class="small">
+                        <li><strong>Шаг 1:</strong> Из колонки "Наименование товара" извлекается количество в упаковке (например, "10 штук" → 10)</li>
+                        <li><strong>Шаг 2:</strong> Из колонки "Количество" берется количество упаковок</li>
+                        <li><strong>Шаг 3:</strong> Итог = количество упаковок × количество в упаковке</li>
+                    </ul>
+                    
+                    <h6 class="mt-3">Примеры:</h6>
+                    <table class="table table-sm table-bordered">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Наименование товара</th>
+                                <th>Кол-во</th>
+                                <th>Итог</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Флакон 100 мл, 10 штук</td>
+                                <td>2</td>
+                                <td><strong>20</strong> (2×10)</td>
+                            </tr>
+                            <tr>
+                                <td>Баночки, 3 штуки</td>
+                                <td>5</td>
+                                <td><strong>15</strong> (5×3)</td>
+                            </tr>
+                            <tr>
+                                <td>Набор, 6 шт</td>
+                                <td>1</td>
+                                <td><strong>6</strong> (1×6)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <h6 class="mt-3">Поддержка составных артикулов:</h6>
+                    <p class="small">
+                        Артикулы с символом <code>_</code> автоматически разбираются на составные части.
+                        Система ищет максимально длинное совпадение в базе товаров.
+                    </p>
+                </div>
+            </div>
+            
+            <!-- Диагностика -->
+            <div class="card mb-4 border-warning">
+                <div class="card-header bg-warning">
+                    <h5 class="mb-0"><i class="fas fa-bug me-2"></i>Диагностика</h5>
+                </div>
+                <div class="card-body">
+                    <p class="small text-muted">Проверить наличие артикулов в базе:</p>
+                    
+                    <div class="input-group mb-2">
+                        <input type="text" class="form-control" id="diagnosticArticle" 
+                               placeholder="Введите артикул для проверки">
+                        <button class="btn btn-warning" onclick="checkArticle()">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                    
+                    <div id="diagnosticResult" style="display: none;">
+                        <div class="diagnostic-output" id="diagnosticOutput"></div>
+                        <button class="btn btn-sm btn-link mt-2" onclick="copyDiagnostic()">
+                            <i class="fas fa-copy"></i> Копировать
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Примеры расчета -->
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0"><i class="fas fa-calculator me-2"></i>Примеры расчета</h5>
+                </div>
+                <div class="card-body">
+                    <div class="small">
+                        <p><strong>Из вашего файла:</strong></p>
+                        <ul class="list-unstyled">
+                            <li class="mb-2">
+                                <span class="badge bg-info">10 шт</span>
+                                "Флакон 100 мл..., 10 штук" × 1 = <strong>10</strong>
+                            </li>
+                            <li class="mb-2">
+                                <span class="badge bg-info">3 шт</span>
+                                "Флакон для диффузора..., 3 шт" × 1 = <strong>3</strong>
+                            </li>
+                            <li class="mb-2">
+                                <span class="badge bg-info">10 шт</span>
+                                "Флакон с пипеткой..., 10 штук" × 10 = <strong>100</strong>
+                            </li>
+                            <li class="mb-2">
+                                <span class="badge bg-info">6 шт</span>
+                                "Баночки..., 6 штук" × 2 = <strong>12</strong>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно деталей заказа -->
+<div class="modal fade" id="detailsModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-eye me-2"></i>
+                    Детали заказа <span id="detailOrderNumber"></span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="detailsContent">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                <button type="button" class="btn btn-success" onclick="loadCurrentOrder()" id="loadOrderBtn">
+                    <i class="fas fa-download me-1"></i>Загрузить этот заказ
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно подтверждения -->
+<div class="modal fade" id="confirmModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning">
+                <h5 class="modal-title">Подтверждение</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="confirmMessage"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-success" id="confirmBtn">Загрузить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно результата -->
+<div class="modal fade" id="resultModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">Результат загрузки</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="resultMessage">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentOrders = [];
+let allProducts = [];
+let currentDetailIndex = -1;
+let selectedFile = null;
+
+// Загрузка всех товаров при инициализации
+function loadAllProducts() {
+    fetch('/products/search?q=')
+        .then(response => response.json())
+        .then(data => {
+            allProducts = data;
+            console.log('Загружено товаров для поиска:', allProducts.length);
+        })
+        .catch(error => console.error('Ошибка загрузки товаров:', error));
+}
+
+// Функция для рекурсивного разбора составного артикула
+function parseCompositeArticleRecursive(article, products) {
+    if (!article || !article.includes('_')) {
+        return { 
+            found: [], 
+            remaining: article ? [article] : [],
+            parts: [{text: article, found: false}]
+        };
+    }
+    
+    const result = {
+        found: [],
+        remaining: [],
+        parts: []
+    };
+    
+    // Сортируем товары по длине артикула (от длинных к коротким)
+    const sortedProducts = [...(products || allProducts)].sort((a, b) => 
+        (b.article?.length || 0) - (a.article?.length || 0)
+    );
+    
+    // Создаем Set существующих артикулов для быстрого поиска
+    const existingArticles = new Set(sortedProducts.map(p => p.article));
+    
+    function recursiveParse(str, depth = 0) {
+        if (!str || str.length === 0) return;
+        
+        // Ищем точное совпадение
+        const exactMatch = sortedProducts.find(p => p.article === str);
+        if (exactMatch) {
+            result.found.push(exactMatch);
+            result.parts.push({text: str, found: true, product: exactMatch});
+            return;
+        }
+        
+        // Разбиваем по _
+        const parts = str.split('_');
+        if (parts.length <= 1) {
+            result.remaining.push(str);
+            result.parts.push({text: str, found: false});
+            return;
+        }
+        
+        // Пробуем найти самое длинное совпадение
+        let bestMatch = null;
+        let bestProduct = null;
+        let bestIndex = -1;
+        
+        for (let i = parts.length; i > 0; i--) {
+            const candidate = parts.slice(0, i).join('_');
+            if (existingArticles.has(candidate)) {
+                const match = sortedProducts.find(p => p.article === candidate);
+                if (match && (!bestMatch || candidate.length > bestMatch.length)) {
+                    bestMatch = candidate;
+                    bestProduct = match;
+                    bestIndex = i;
+                }
+            }
+        }
+        
+        if (bestProduct) {
+            result.found.push(bestProduct);
+            result.parts.push({text: bestMatch, found: true, product: bestProduct});
+            
+            // Ищем в оставшейся части
+            const remaining = str.substring(bestMatch.length).replace(/^_+/, '');
+            if (remaining) {
+                recursiveParse(remaining, depth + 1);
+            }
+        } else {
+            // Если ничего не нашли, пробуем найти части внутри
+            let foundAny = false;
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+                if (existingArticles.has(part)) {
+                    const match = sortedProducts.find(p => p.article === part);
+                    result.found.push(match);
+                    result.parts.push({text: part, found: true, product: match});
+                    
+                    // Части до и после
+                    const before = parts.slice(0, i).join('_');
+                    const after = parts.slice(i + 1).join('_');
+                    
+                    if (before) {
+                        recursiveParse(before, depth + 1);
+                    }
+                    if (after) {
+                        recursiveParse(after, depth + 1);
+                    }
+                    foundAny = true;
+                    break;
+                }
+            }
+            
+            if (!foundAny) {
+                result.remaining.push(str);
+                result.parts.push({text: str, found: false});
+            }
+        }
+    }
+    
+    recursiveParse(article);
+    return result;
+}
+
+// Drag & Drop обработчики
+document.getElementById('uploadArea').addEventListener('dragover', function(e) {
+    e.preventDefault();
+    this.classList.add('dragover');
+});
+
+document.getElementById('uploadArea').addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    this.classList.remove('dragover');
+});
+
+document.getElementById('uploadArea').addEventListener('drop', function(e) {
+    e.preventDefault();
+    this.classList.remove('dragover');
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        handleFileSelect(files[0]);
+    }
+});
+
+document.getElementById('fileInput').addEventListener('change', function(e) {
+    if (this.files.length > 0) {
+        handleFileSelect(this.files[0]);
+    }
+});
+
+function handleFileSelect(file) {
+    const validExtensions = ['.xlsx', '.xls'];
+    const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    
+    if (!validExtensions.includes(ext)) {
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Неверный формат файла. Разрешены только Excel файлы (.xlsx, .xls)',
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+        return;
+    }
+    
+    if (file.size > 10 * 1024 * 1024) {
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Файл слишком большой. Максимальный размер 10MB',
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+        return;
+    }
+    
+    selectedFile = file;
+    document.getElementById('fileName').textContent = file.name;
+    document.getElementById('fileInfo').style.display = 'block';
+    document.getElementById('uploadBtn').disabled = false;
+}
+
+function clearFile() {
+    selectedFile = null;
+    document.getElementById('fileInput').value = '';
+    document.getElementById('fileInfo').style.display = 'none';
+    document.getElementById('uploadBtn').disabled = true;
+}
+
+function uploadFile() {
+    const fileInput = document.getElementById('fileInput');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Выберите файл',
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+        return;
+    }
+    
+    document.getElementById('progressCard').style.display = 'block';
+    document.getElementById('results').style.display = 'none';
+    document.getElementById('error').style.display = 'none';
+    document.getElementById('uploadBtn').disabled = true;
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    fetch('/upload/ozon', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        document.getElementById('progressCard').style.display = 'none';
+        
+        if (data.success) {
+            currentOrders = data.orders;
+            document.getElementById('statsTotal').textContent = `${data.total_orders} заказов, ${data.total_items} позиций`;
+            displayResults(currentOrders);
+        } else {
+            showError(data.error || 'Ошибка при обработке файла');
+            document.getElementById('uploadBtn').disabled = false;
+        }
+    })
+    .catch(error => {
+        document.getElementById('progressCard').style.display = 'none';
+        document.getElementById('uploadBtn').disabled = false;
+        showError('Ошибка при загрузке файла: ' + error.message);
+    });
+}
+
+function displayResults(orders) {
+    document.getElementById('results').style.display = 'block';
+    
+    let html = '';
+    
+    if (orders.length > 0) {
+        html += '<div class="table-responsive">';
+        html += '<table class="table table-hover table-sm">';
+        html += '<thead><tr><th>№ заказа</th><th>Дата</th><th>Позиций</th><th>Всего единиц</th><th>Составные</th><th>Пример расчета</th><th>Действия</th></tr></thead>';
+        html += '<tbody>';
+        
+        orders.forEach((order, index) => {
+            // Анализируем составные артикулы
+            const compositeItems = order.items.filter(item => 
+                item.article && item.article.includes('_')
+            );
+            
+            let compositeBadge = compositeItems.length > 0 ? 
+                `<span class="badge bg-info" title="Составные артикулы">
+                    <i class="fas fa-puzzle-piece me-1"></i>${compositeItems.length}
+                </span>` : 
+                '<span class="badge bg-secondary">—</span>';
+            
+            // Показываем пример расчета для первого товара
+            let calculationExample = '';
+            if (order.items && order.items.length > 0) {
+                const firstItem = order.items[0];
+                calculationExample = `
+                    <div class="product-tooltip">
+                        <span class="badge bg-secondary calculation-badge">
+                            ${firstItem.pack_quantity || '?'} шт × ${firstItem.col_quantity || '?'} = ${firstItem.quantity}
+                        </span>
+                        <span class="tooltip-text">
+                            <strong>Расчет:</strong><br>
+                            В упаковке: ${firstItem.pack_quantity || '?'} шт<br>
+                            Упаковок: ${firstItem.col_quantity || '?'}<br>
+                            <strong>Итого: ${firstItem.quantity} шт</strong><br>
+                            <small>${firstItem.calculation || ''}</small>
+                        </span>
+                    </div>
+                `;
+            }
+            
+            html += '<tr>';
+            html += '<td><strong>' + escapeHtml(order.order_number) + '</strong></td>';
+            html += '<td>' + (order.date || '—') + '</td>';
+            html += '<td class="text-center">' + order.items.length + '</td>';
+            html += '<td class="text-center"><span class="badge bg-success" style="font-size: 1rem;">' + (order.total_quantity || 0) + '</span></td>';
+            html += '<td class="text-center">' + compositeBadge + '</td>';
+            html += '<td>' + calculationExample + '</td>';
+            html += '<td>';
+            html += '<button class="btn btn-sm btn-info me-1" onclick="showDetails(' + index + ')">';
+            html += '<i class="fas fa-eye"></i>';
+            html += '</button>';
+            html += '<button class="btn btn-sm btn-success" onclick="loadOrder(' + index + ')">';
+            html += '<i class="fas fa-download"></i>';
+            html += '</button>';
+            html += '</td>';
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table>';
+        html += '</div>';
+        
+        // Добавляем статистику
+        const totalItems = orders.reduce((sum, o) => sum + o.items.length, 0);
+        const totalUnits = orders.reduce((sum, o) => sum + (o.total_quantity || 0), 0);
+        const totalComposite = orders.reduce((sum, o) => 
+            sum + o.items.filter(i => i.article && i.article.includes('_')).length, 0);
+        
+        html += `
+            <div class="row mt-3">
+                <div class="col-md-3">
+                    <div class="stats-card">
+                        <i class="fas fa-shopping-cart fa-2x text-primary mb-2"></i>
+                        <div class="stats-number">${orders.length}</div>
+                        <div class="text-muted">Заказов</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stats-card">
+                        <i class="fas fa-list fa-2x text-info mb-2"></i>
+                        <div class="stats-number">${totalItems}</div>
+                        <div class="text-muted">Позиций</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stats-card">
+                        <i class="fas fa-cubes fa-2x text-success mb-2"></i>
+                        <div class="stats-number text-success">${totalUnits}</div>
+                        <div class="text-muted">Всего единиц</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stats-card">
+                        <i class="fas fa-puzzle-piece fa-2x text-warning mb-2"></i>
+                        <div class="stats-number">${totalComposite}</div>
+                        <div class="text-muted">Составных</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Добавляем информацию о расчетах
+        html += `
+            <div class="alert alert-info mt-3 small">
+                <i class="fas fa-calculator me-2"></i>
+                <strong>Как рассчитано количество:</strong> 
+                Количество в упаковке извлекается из названия товара (например, "10 штук" → 10) 
+                и умножается на количество упаковок из колонки "Количество".
+                Наведите на badge расчета для подробностей.
+            </div>
+        `;
+    } else {
+        html = '<p class="text-warning text-center py-4">В файле не найдено заказов</p>';
+        document.getElementById('loadAllBtn').style.display = 'none';
+    }
+    
+    document.getElementById('ordersList').innerHTML = html;
+}
+
+function showDetails(index) {
+    const order = currentOrders[index];
+    currentDetailIndex = index;
+    
+    document.getElementById('detailOrderNumber').textContent = order.order_number;
+    
+    let html = '';
+    
+    if (order.date) {
+        html += `<p class="text-muted">Дата: ${order.date}</p>`;
+    }
+    
+    html += '<div class="table-responsive">';
+    html += '<table class="table table-sm table-bordered">';
+    html += '<thead class="table-light"><tr>';
+    html += '<th>№</th>';
+    html += '<th>Артикул</th>';
+    html += '<th>Наименование</th>';
+    html += '<th>Кол-во</th>';
+    html += '<th>Расчет</th>';
+    html += '<th>Разбор</th>';
+    html += '</tr></thead>';
+    html += '<tbody>';
+    
+    if (order.items && order.items.length > 0) {
+        order.items.forEach((item, i) => {
+            let parseInfo = '';
+            
+            if (item.article && item.article.includes('_')) {
+                const parseResult = parseCompositeArticleRecursive(item.article, allProducts);
+                
+                if (parseResult.parts.length > 0) {
+                    parseInfo = '<div class="small">';
+                    parseInfo += '<div class="composite-parts">';
+                    
+                    parseResult.parts.forEach(part => {
+                        const statusClass = part.found ? 'found' : 'not-found';
+                        const title = part.found ? 
+                            `Найден: ${part.product ? part.product.name : ''}` : 
+                            'Будет создан новый товар';
+                        
+                        parseInfo += `<span class="composite-part ${statusClass}" title="${title}">`;
+                        parseInfo += `<code>${escapeHtml(part.text)}</code>`;
+                        if (part.found) {
+                            parseInfo += ` <i class="fas fa-check-circle text-success"></i>`;
+                        } else {
+                            parseInfo += ` <i class="fas fa-plus-circle text-warning"></i>`;
+                        }
+                        parseInfo += '</span>';
+                    });
+                    
+                    parseInfo += '</div>';
+                    parseInfo += '</div>';
+                } else {
+                    parseInfo = '<span class="badge bg-warning">Не удалось разобрать</span>';
+                }
+            } else {
+                parseInfo = '<span class="badge bg-secondary">Обычный артикул</span>';
+            }
+            
+            html += '<tr>';
+            html += '<td>' + (i + 1) + '</td>';
+            html += '<td><code>' + escapeHtml(item.article || '') + '</code></td>';
+            html += '<td>';
+            html += '<div class="product-tooltip">';
+            html += escapeHtml(item.product || '');
+            if (item.product_full_name && item.product_full_name !== item.product) {
+                html += '<span class="tooltip-text">' + escapeHtml(item.product_full_name) + '</span>';
+            }
+            html += '</div>';
+            html += '</td>';
+            html += '<td class="text-end"><strong>' + item.quantity + '</strong></td>';
+            html += '<td><span class="badge bg-info">' + escapeHtml(item.calculation || '') + '</span></td>';
+            html += '<td>' + parseInfo + '</td>';
+            html += '</tr>';
+        });
+    } else {
+        html += '<tr><td colspan="6" class="text-center text-muted">Нет товаров</td></tr>';
+    }
+    
+    html += '</tbody></table>';
+    html += '</div>';
+    
+    document.getElementById('detailsContent').innerHTML = html;
+    
+    const modal = new bootstrap.Modal(document.getElementById('detailsModal'));
+    modal.show();
+}
+
+function loadCurrentOrder() {
+    if (currentDetailIndex >= 0) {
+        const modal = bootstrap.Modal.getInstance(document.getElementById('detailsModal'));
+        modal.hide();
+        loadOrder(currentDetailIndex);
+    }
+}
+
+function loadOrder(index) {
+    const order = currentOrders[index];
+    showConfirmDialog(
+        'Загрузить заказ Ozon №' + order.order_number + '?<br>' +
+        '<small class="text-muted">Всего единиц: ' + order.total_quantity + '</small>',
+        function() {
+            loadOrders([order]);
+        }
+    );
+}
+
+function loadAllOrders() {
+    const totalUnits = currentOrders.reduce((sum, o) => sum + (o.total_quantity || 0), 0);
+    showConfirmDialog(
+        'Загрузить все найденные заказы Ozon?<br>' +
+        '<small class="text-muted">Заказов: ' + currentOrders.length + 
+        ', всего единиц: ' + totalUnits + '</small>',
+        function() {
+            loadOrders(currentOrders);
+        }
+    );
+}
+
+function loadOrders(orders) {
+    Swal.fire({
+        title: 'Загрузка...',
+        text: 'Пожалуйста, подождите',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
+    
+    fetch('/upload/ozon/load', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({orders: orders})
+    })
+    .then(response => response.json())
+    .then(data => {
+        Swal.close();
+        
+        if (data.success) {
+            let message = `
+                <div class="text-center">
+                    <i class="fas fa-check-circle fa-4x text-success mb-3"></i>
+                    <h5>Загрузка завершена!</h5>
+                    <p>✅ Загружено заказов: <strong>${data.loaded}</strong></p>
+                    <p>⏭️ Пропущено: <strong>${data.skipped}</strong></p>
+                    <p>🆕 Новых товаров: <strong>${data.new_products}</strong></p>
+            `;
+            
+            if (data.composite_articles > 0) {
+                message += `<p>🧩 Составных артикулов: <strong>${data.composite_articles}</strong></p>`;
+            }
+            
+            if (data.composite_log && data.composite_log.length > 0) {
+                message += '<div class="alert alert-info mt-3 text-start">';
+                message += '<strong>Примеры разбора:</strong><ul>';
+                data.composite_log.slice(0, 3).forEach(log => {
+                    message += `<li>
+                        <code>${escapeHtml(log.original)}</code> → 
+                        найдено: ${log.found}, создано: ${log.created}
+                        ${log.calculation ? `<br><small class="text-muted">Расчет: ${log.calculation}</small>` : ''}
+                    </li>`;
+                });
+                message += '</ul></div>';
+            }
+            
+            message += '</div>';
+            
+            document.getElementById('resultMessage').innerHTML = message;
+            const resultModal = new bootstrap.Modal(document.getElementById('resultModal'));
+            resultModal.show();
+            
+            // Очищаем
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('fileInput').value = '';
+            document.getElementById('fileInfo').style.display = 'none';
+            document.getElementById('uploadBtn').disabled = true;
+            currentOrders = [];
+        } else {
+            Swal.fire({
+                title: 'Ошибка!',
+                text: data.error || 'Ошибка при загрузке',
+                icon: 'error',
+                confirmButtonText: 'OK'
+            });
+        }
+    })
+    .catch(error => {
+        Swal.close();
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Ошибка при загрузке: ' + error.message,
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+    });
+}
+
+// Диагностические функции
+function checkArticle() {
+    const article = document.getElementById('diagnosticArticle').value.trim();
+    if (!article) return;
+    
+    Swal.fire({
+        title: 'Проверка...',
+        text: 'Поиск артикула в базе',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
+    
+    fetch('/debug/check-article', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({article: article})
+    })
+    .then(response => response.json())
+    .then(data => {
+        Swal.close();
+        
+        if (data.success) {
+            let output = '=== РЕЗУЛЬТАТ ПРОВЕРКИ ===\n\n';
+            output += `Артикул: ${data.article}\n`;
+            output += `Точное совпадение: ${data.exact_match.found ? '✅ ДА' : '❌ НЕТ'}\n`;
+            
+            if (data.exact_match.found) {
+                output += `  → Товар: ${data.exact_match.product.name}\n`;
+            }
+            
+            output += '\n=== РЕЗУЛЬТАТ РАЗБОРА ===\n';
+            output += `Найдено частей: ${data.search_result.found.length}\n`;
+            data.search_result.found.forEach(p => {
+                output += `  ✅ ${p.article} - ${p.name}\n`;
+            });
+            
+            output += `\nНе найдено: ${data.search_result.not_found.length}\n`;
+            data.search_result.not_found.forEach(p => {
+                output += `  ❌ ${p}\n`;
+            });
+            
+            document.getElementById('diagnosticOutput').textContent = output;
+            document.getElementById('diagnosticResult').style.display = 'block';
+        } else {
+            Swal.fire({
+                title: 'Ошибка!',
+                text: data.error || 'Ошибка при проверке',
+                icon: 'error',
+                confirmButtonText: 'OK'
+            });
+        }
+    })
+    .catch(error => {
+        Swal.close();
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Ошибка при проверке: ' + error.message,
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+    });
+}
+
+function copyDiagnostic() {
+    const output = document.getElementById('diagnosticOutput').textContent;
+    navigator.clipboard.writeText(output).then(() => {
+        Swal.fire({
+            title: 'Скопировано!',
+            text: 'Результат диагностики скопирован в буфер обмена',
+            icon: 'success',
+            timer: 1500,
+            showConfirmButton: false
+        });
+    });
+}
+
+function showConfirmDialog(message, callback) {
+    document.getElementById('confirmMessage').innerHTML = message;
+    
+    const oldBtn = document.getElementById('confirmBtn');
+    const newBtn = oldBtn.cloneNode(true);
+    oldBtn.parentNode.replaceChild(newBtn, oldBtn);
+    
+    newBtn.addEventListener('click', function() {
+        const modal = bootstrap.Modal.getInstance(document.getElementById('confirmModal'));
+        modal.hide();
+        callback();
+    });
+    
+    const confirmModal = new bootstrap.Modal(document.getElementById('confirmModal'));
+    confirmModal.show();
+}
+
+function showError(message) {
+    document.getElementById('error').style.display = 'block';
+    document.getElementById('errorMessage').textContent = message;
+}
+
+function escapeHtml(unsafe) {
+    if (!unsafe) return '';
+    return String(unsafe)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// Загружаем товары при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    loadAllProducts();
+});
+</script>
+{% endblock %}

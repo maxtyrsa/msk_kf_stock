@@ -1,0 +1,351 @@
+{% extends "base.html" %}
+
+{% block title %}Инвентаризация - Складской учет{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="fas fa-clipboard-list me-2"></i>Инвентаризация склада</h2>
+        <div>
+            <button class="btn btn-info me-2" onclick="showUploadInventoryModal()">
+                <i class="fas fa-upload me-1"></i>Загрузить из файла
+            </button>
+            <a href="{{ url_for('export_inventory') }}" class="btn btn-success me-2">
+                <i class="fas fa-download me-1"></i>Скачать бланк
+            </a>
+            <button class="btn btn-primary" onclick="saveInventory()">
+                <i class="fas fa-save me-1"></i>Сохранить результаты
+            </button>
+        </div>
+    </div>
+    
+    <div class="alert alert-info mb-4">
+        <i class="fas fa-info-circle me-2"></i>
+        Введите фактические остатки товаров. Расхождение рассчитается автоматически.
+        После завершения нажмите "Сохранить результаты".
+    </div>
+    
+    <!-- Поиск и фильтры -->
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <div class="input-group">
+                <span class="input-group-text"><i class="fas fa-search"></i></span>
+                <input type="text" id="searchInput" class="form-control" 
+                       placeholder="Поиск по названию, артикулу или модели..."
+                       onkeyup="filterInventory()">
+                <button class="btn btn-outline-secondary" type="button" onclick="clearSearch()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="btn-group w-100" role="group">
+                <button class="btn btn-outline-primary" onclick="filterDiscrepancies()">
+                    <i class="fas fa-exclamation-triangle me-1"></i>Только расхождения
+                </button>
+                <button class="btn btn-outline-secondary" onclick="resetFilters()">
+                    <i class="fas fa-undo me-1"></i>Сброс
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Статистика поиска -->
+    <div id="searchStats" class="mb-3" style="display: none;">
+        <div class="alert alert-info">
+            <i class="fas fa-filter me-2"></i>
+            Найдено позиций: <strong id="foundCount">0</strong> из <strong id="totalCount">{{ inventory|length }}</strong>
+            <button class="btn btn-sm btn-link float-end" onclick="resetFilters()">
+                <i class="fas fa-times me-1"></i>Сбросить фильтр
+            </button>
+        </div>
+    </div>
+    
+    <!-- Индикатор загрузки -->
+    <div id="loadingIndicator" class="text-center my-5" style="display: none;">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Загрузка...</span>
+        </div>
+        <p class="mt-2">Загрузка данных...</p>
+    </div>
+    
+    <!-- Таблица инвентаризации -->
+    <div class="table-responsive" id="inventoryTableContainer">
+        <table id="inventoryTable" class="table table-hover">
+            <thead>
+                <tr>
+                    <th>№</th>
+                    <th>Артикул</th>
+                    <th>Название товара</th>
+                    <th>Модель</th>
+                    <th>Текущий остаток</th>
+                    <th>Фактический остаток</th>
+                    <th>Расхождение</th>
+                    <th>Статус</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in inventory %}
+                <tr data-article="{{ item.article }}" 
+                    data-name="{{ item.name|lower }}" 
+                    data-model="{{ item.model|default('')|lower }}">
+                    <td>{{ loop.index }}</td>
+                    <td>
+                        <code>{{ item.article }}</code>
+                        {% if '_' in item.article %}
+                            <span class="badge bg-info" title="Составной артикул">🧩</span>
+                        {% endif %}
+                    </td>
+                    <td class="product-name">{{ item.name }}</td>
+                    <td class="product-model">{{ item.model|default('') }}</td>
+                    <td class="current-stock">{{ item.current_stock }}</td>
+                    <td>
+                        <input type="number" class="form-control form-control-sm actual-stock" 
+                               value="{{ item.current_stock }}" min="0" style="width: 100px;"
+                               onchange="updateRow(this)">
+                    </td>
+                    <td class="difference">0</td>
+                    <td class="status-cell">
+                        <span class="badge bg-success">OK</span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Итоги -->
+    <div class="row mt-4">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Всего позиций</h6>
+                    <h3 id="totalItems">{{ inventory|length }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Показано</h6>
+                    <h3 id="visibleItems">{{ inventory|length }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">С расхождениями</h6>
+                    <h3 id="discrepancyCount">0</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Общее расхождение</h6>
+                    <h3 id="totalDiscrepancy">0</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно загрузки инвентаризации (без изменений) -->
+<!-- ... существующий код модального окна ... -->
+
+<script>
+let uploadedData = null;
+let discrepancyItems = [];
+
+function filterInventory() {
+    const searchText = document.getElementById('searchInput').value.toLowerCase().trim();
+    const rows = document.querySelectorAll('#inventoryTable tbody tr');
+    let visibleCount = 0;
+    
+    rows.forEach(row => {
+        const article = row.querySelector('td:nth-child(2)').textContent.toLowerCase();
+        const name = row.querySelector('.product-name').textContent.toLowerCase();
+        const model = row.querySelector('.product-model')?.textContent.toLowerCase() || '';
+        
+        if (searchText === '' || article.includes(searchText) || name.includes(searchText) || model.includes(searchText)) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+    
+    document.getElementById('visibleItems').textContent = visibleCount;
+    
+    if (searchText !== '') {
+        document.getElementById('searchStats').style.display = 'block';
+        document.getElementById('foundCount').textContent = visibleCount;
+    } else {
+        document.getElementById('searchStats').style.display = 'none';
+    }
+    
+    updateTotals();
+}
+
+function filterDiscrepancies() {
+    const rows = document.querySelectorAll('#inventoryTable tbody tr');
+    let visibleCount = 0;
+    
+    rows.forEach(row => {
+        const difference = parseInt(row.querySelector('.difference').textContent) || 0;
+        if (difference !== 0) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+    
+    document.getElementById('visibleItems').textContent = visibleCount;
+    document.getElementById('searchInput').value = '';
+    document.getElementById('searchStats').style.display = 'block';
+    document.getElementById('foundCount').textContent = visibleCount;
+    
+    updateTotals();
+}
+
+function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    resetFilters();
+}
+
+function resetFilters() {
+    const rows = document.querySelectorAll('#inventoryTable tbody tr');
+    rows.forEach(row => row.style.display = '');
+    
+    document.getElementById('visibleItems').textContent = rows.length;
+    document.getElementById('searchStats').style.display = 'none';
+    document.getElementById('searchInput').value = '';
+    
+    updateTotals();
+}
+
+function updateRow(input) {
+    const row = input.closest('tr');
+    const current = parseInt(row.querySelector('.current-stock').textContent);
+    const actual = parseInt(input.value) || 0;
+    const difference = actual - current;
+    
+    row.querySelector('.difference').textContent = difference;
+    
+    const statusCell = row.querySelector('.status-cell');
+    if (difference === 0) {
+        statusCell.innerHTML = '<span class="badge bg-success">OK</span>';
+    } else {
+        statusCell.innerHTML = '<span class="badge bg-warning text-dark">Расхождение</span>';
+    }
+    
+    updateTotals();
+}
+
+function saveInventory() {
+    const items = [];
+    let hasDiscrepancies = false;
+    
+    document.querySelectorAll('#inventoryTable tbody tr:visible').forEach(row => {
+        const article = row.dataset.article;
+        const name = row.querySelector('.product-name').textContent;
+        const actual = parseInt(row.querySelector('.actual-stock').value) || 0;
+        const current = parseInt(row.querySelector('.current-stock').textContent);
+        
+        items.push({
+            article: article,
+            name: name,
+            new_stock: actual
+        });
+        
+        if (actual !== current) {
+            hasDiscrepancies = true;
+        }
+    });
+    
+    discrepancyItems = items;
+    
+    let message = hasDiscrepancies ? 
+        '⚠️ Есть расхождения. Сохранить результаты?' : 
+        'Сохранить результаты инвентаризации?';
+    
+    document.getElementById('confirmSaveMessage').textContent = message;
+    new bootstrap.Modal(document.getElementById('confirmSaveModal')).show();
+}
+
+function confirmSave() {
+    const modal = bootstrap.Modal.getInstance(document.getElementById('confirmSaveModal'));
+    modal.hide();
+    
+    Swal.fire({
+        title: 'Сохранение...',
+        text: 'Пожалуйста, подождите',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
+    
+    fetch('/inventory/update', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({items: discrepancyItems})
+    })
+    .then(response => response.json())
+    .then(data => {
+        Swal.close();
+        
+        if (data.success) {
+            Swal.fire({
+                title: 'Успех!',
+                text: 'Инвентаризация сохранена',
+                icon: 'success',
+                timer: 1500,
+                showConfirmButton: false
+            }).then(() => location.reload());
+        } else {
+            Swal.fire({
+                title: 'Ошибка!',
+                text: data.error || 'Ошибка при сохранении',
+                icon: 'error',
+                confirmButtonText: 'OK'
+            });
+        }
+    })
+    .catch(error => {
+        Swal.close();
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Ошибка при сохранении: ' + error.message,
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+    });
+}
+
+function updateTotals() {
+    let discrepancyCount = 0;
+    let totalDiscrepancy = 0;
+    
+    document.querySelectorAll('#inventoryTable tbody tr:visible').forEach(row => {
+        const diff = parseInt(row.querySelector('.difference').textContent) || 0;
+        if (diff !== 0) {
+            discrepancyCount++;
+            totalDiscrepancy += Math.abs(diff);
+        }
+    });
+    
+    document.getElementById('discrepancyCount').textContent = discrepancyCount;
+    document.getElementById('totalDiscrepancy').textContent = totalDiscrepancy;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('totalCount').textContent = {{ inventory|length }};
+    updateTotals();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block title %}Главная - Складской учет{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Приветственный баннер -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h1 class="display-4"><i class="fas fa-warehouse me-3"></i>Складской учет</h1>
+                            <p class="lead">Добро пожаловать в систему управления складом и инвентаризации</p>
+                            <hr class="my-4 bg-white">
+                            <p>Управляйте товарами, отслеживайте заказы, проводите инвентаризацию</p>
+                            <a href="{{ url_for('dashboard') }}" class="btn btn-light btn-lg mt-2">
+                                <i class="fas fa-tachometer-alt me-2"></i>Перейти к дашборду
+                            </a>
+                        </div>
+                        <div class="col-md-4 text-center">
+                            <i class="fas fa-boxes fa-8x opacity-50"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Быстрый доступ -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-boxes fa-3x text-primary mb-3"></i>
+                    <h5 class="card-title">Товары</h5>
+                    <p class="card-text">Управление номенклатурой, просмотр остатков</p>
+                    <a href="{{ url_for('products_list') }}" class="btn btn-outline-primary stretched-link">
+                        Перейти <i class="fas fa-arrow-right ms-1"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-shopping-cart fa-3x text-success mb-3"></i>
+                    <h5 class="card-title">Заказы</h5>
+                    <p class="card-text">Просмотр и экспорт заказов</p>
+                    <a href="{{ url_for('orders_list') }}" class="btn btn-outline-success stretched-link">
+                        Перейти <i class="fas fa-arrow-right ms-1"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-clipboard-list fa-3x text-warning mb-3"></i>
+                    <h5 class="card-title">Инвентаризация</h5>
+                    <p class="card-text">Проведение и сохранение результатов</p>
+                    <a href="{{ url_for('inventory') }}" class="btn btn-outline-warning stretched-link">
+                        Перейти <i class="fas fa-arrow-right ms-1"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-chart-bar fa-3x text-info mb-3"></i>
+                    <h5 class="card-title">Отчеты</h5>
+                    <p class="card-text">Генерация отчетов по движению</p>
+                    <a href="{{ url_for('reports') }}" class="btn btn-outline-info stretched-link">
+                        Перейти <i class="fas fa-arrow-right ms-1"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Последние операции -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="fas fa-download me-2"></i>Загрузка PDF</h5>
+                </div>
+                <div class="card-body">
+                    <p>Загрузите PDF файл с заказами для автоматической обработки и списания товаров.</p>
+                    <a href="{{ url_for('upload_pdf') }}" class="btn btn-success">
+                        <i class="fas fa-file-pdf me-2"></i>Загрузить PDF
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="fas fa-download me-2"></i>Экспорт данных</h5>
+                </div>
+                <div class="card-body">
+                    <p>Скачайте бланк для инвентаризации или экспортируйте данные в Excel.</p>
+                    <a href="{{ url_for('export_inventory') }}" class="btn btn-info">
+                        <i class="fas fa-file-excel me-2"></i>Скачать бланк инвентаризации
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Статистика в реальном времени -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i>Статистика в реальном времени</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-md-3">
+                            <h3 id="statProducts" class="text-primary">0</h3>
+                            <p class="text-muted">Всего товаров</p>
+                        </div>
+                        <div class="col-md-3">
+                            <h3 id="statOrders" class="text-success">0</h3>
+                            <p class="text-muted">Всего заказов</p>
+                        </div>
+                        <div class="col-md-3">
+                            <h3 id="statStock" class="text-info">0</h3>
+                            <p class="text-muted">Единиц на складе</p>
+                        </div>
+                        <div class="col-md-3">
+                            <h3 id="statLowStock" class="text-warning">0</h3>
+                            <p class="text-muted">Низкий запас</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Загрузка статистики
+    $(document).ready(function() {
+        $.get('/api/stats', function(data) {
+            $('#statProducts').text(data.total_products);
+            $('#statOrders').text(data.total_orders);
+            $('#statStock').text(data.total_stock);
+            $('#statLowStock').text(data.low_stock);
+        });
+        
+        // Обновление каждые 30 секунд
+        setInterval(function() {
+            $.get('/api/stats', function(data) {
+                $('#statProducts').text(data.total_products);
+                $('#statOrders').text(data.total_orders);
+                $('#statStock').text(data.total_stock);
+                $('#statLowStock').text(data.low_stock);
+            });
+        }, 30000);
+    });
+</script>
+
+<style>
+    .opacity-50 {
+        opacity: 0.5;
+    }
+    .stat-card {
+        transition: transform 0.3s;
+    }
+    .stat-card:hover {
+        transform: translateY(-5px);
+    }
+</style>
+{% endblock %}

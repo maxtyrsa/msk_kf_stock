@@ -1,0 +1,555 @@
+{% extends "base.html" %}
+
+{% block title %}Заказ №{{ order_number }} - Складской учет{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="fas fa-file-invoice me-2"></i>Заказ №{{ order_number }}</h2>
+        <div>
+            <button class="btn btn-success me-2" onclick="exportOrder()">
+                <i class="fas fa-file-excel me-1"></i>Экспорт в Excel
+            </button>
+            <a href="{{ url_for('orders_list') }}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left me-1"></i>Назад к заказам
+            </a>
+        </div>
+    </div>
+    
+    <!-- Информация о заказе -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Номер заказа</h6>
+                    <h4 class="card-title">{{ order_number }}</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Дата</h6>
+                    <h4 class="card-title">{{ items[0].Date if items else 'Н/Д' }}</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Количество позиций</h6>
+                    <h4 class="card-title">{{ items|length }}</h4>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Кнопки управления -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <button class="btn btn-primary" onclick="showAddItemModal()">
+                <i class="fas fa-plus me-1"></i>Добавить товар
+            </button>
+            <button class="btn btn-info" onclick="saveChanges()">
+                <i class="fas fa-save me-1"></i>Сохранить изменения
+            </button>
+        </div>
+    </div>
+    
+    <!-- Таблица товаров -->
+    <div class="card">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="fas fa-boxes me-2"></i>Товары в заказе</h5>
+            <span class="badge bg-light text-dark">Всего позиций: {{ items|length }}</span>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover" id="orderItemsTable">
+                    <thead>
+                        <tr>
+                            <th>№</th>
+                            <th>Артикул</th>
+                            <th>Название товара</th>
+                            <th>Модель</th>
+                            <th>Количество</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orderItemsBody">
+                        {% for item in items %}
+                        <tr data-id="{{ loop.index0 }}" 
+                            data-article="{{ item['Product Article'] }}" 
+                            data-name="{{ item['Product Name'] }}" 
+                            data-model="{{ item['Product Model']|default('') }}"
+                            data-quantity="{{ item['Quantity'] }}">
+                            <td>{{ loop.index }}</td>
+                            <td><code>{{ item['Product Article'] }}</code></td>
+                            <td>{{ item['Product Name'] }}</td>
+                            <td>{{ item['Product Model']|default('') }}</td>
+                            <td>{{ item['Quantity'] }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-warning" onclick="editItem(this)">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteItem(this)">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr class="table-primary">
+                            <td colspan="4" class="text-end"><strong>ИТОГО:</strong></td>
+                            <td><strong id="totalQuantity">{{ items|sum(attribute='Quantity') }}</strong></td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно добавления/редактирования товара с выпадающим списком -->
+<div class="modal fade" id="itemModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="itemModalTitle">Добавить товар</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="itemForm">
+                    <input type="hidden" id="editIndex" value="-1">
+                    
+                    <!-- Поиск товара -->
+                    <div class="mb-3">
+                        <label class="form-label">Поиск товара</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="productSearch" placeholder="Введите артикул, название или модель...">
+                            <button class="btn btn-outline-secondary" type="button" onclick="searchProducts()">
+                                <i class="fas fa-search"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Результаты поиска -->
+                    <div id="searchResults" class="mb-3" style="max-height: 300px; overflow-y: auto; display: none;">
+                        <div class="list-group" id="resultsList"></div>
+                    </div>
+                    
+                    <!-- Выбранный товар -->
+                    <div id="selectedProductInfo" class="alert alert-info mb-3" style="display: none;">
+                        <strong id="selectedProductName"></strong><br>
+                        <span id="selectedProductArticle"></span><br>
+                        <span id="selectedProductModel"></span>
+                    </div>
+                    
+                    <!-- Ручной ввод -->
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="manualInputCheck" onchange="toggleManualInput()">
+                        <label class="form-check-label">Ручной ввод</label>
+                    </div>
+                    
+                    <div id="manualInputFields" style="display: none;">
+                        <div class="mb-3">
+                            <label class="form-label">Артикул</label>
+                            <input type="text" class="form-control" id="manualArticle">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Название товара</label>
+                            <input type="text" class="form-control" id="manualName">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Модель</label>
+                            <input type="text" class="form-control" id="manualModel">
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Количество <span class="text-danger">*</span></label>
+                        <input type="number" class="form-control" id="itemQuantity" min="1" value="1" required>
+                    </div>
+                    
+                    <input type="hidden" id="selectedArticle">
+                    <input type="hidden" id="selectedName">
+                    <input type="hidden" id="selectedModel">
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary" onclick="saveItem()">
+                    <i class="fas fa-save me-1"></i>Сохранить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно подтверждения удаления -->
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">Подтверждение удаления</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Вы уверены, что хотите удалить этот товар из заказа?</p>
+                <p class="text-muted" id="deleteItemInfo"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger" onclick="confirmDelete()">
+                    <i class="fas fa-trash me-1"></i>Удалить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let searchTimeout;
+let currentEditRow = null;
+let currentDeleteRow = null;
+let orderItems = [];
+let products = [];
+
+// Загружаем список товаров при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    loadProducts();
+    
+    // Сохраняем текущие товары в массив
+    const rows = document.querySelectorAll('#orderItemsBody tr');
+    rows.forEach(row => {
+        orderItems.push({
+            article: row.dataset.article,
+            name: row.dataset.name,
+            model: row.dataset.model || '',
+            quantity: parseInt(row.dataset.quantity)
+        });
+    });
+});
+
+function loadProducts() {
+    fetch('/products/search?q=')
+        .then(response => response.json())
+        .then(data => {
+            products = data;
+        });
+}
+
+function searchProducts() {
+    const query = document.getElementById('productSearch').value.toLowerCase();
+    
+    if (query.length < 2) {
+        document.getElementById('searchResults').style.display = 'none';
+        return;
+    }
+    
+    const results = products.filter(p => 
+        p.article.toLowerCase().includes(query) ||
+        p.name.toLowerCase().includes(query) ||
+        (p.model && p.model.toLowerCase().includes(query))
+    );
+    
+    displaySearchResults(results);
+}
+
+function displaySearchResults(results) {
+    const resultsDiv = document.getElementById('searchResults');
+    const resultsList = document.getElementById('resultsList');
+    
+    if (results.length === 0) {
+        resultsDiv.style.display = 'none';
+        return;
+    }
+    
+    resultsList.innerHTML = '';
+    results.slice(0, 10).forEach(product => {
+        const item = document.createElement('a');
+        item.href = '#';
+        item.className = 'list-group-item list-group-item-action';
+        item.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>${product.name}</strong><br>
+                    <small>Арт: ${product.article}</small>
+                    ${product.model ? `<br><small>Модель: ${product.model}</small>` : ''}
+                </div>
+                <span class="badge bg-info">Остаток: ${product.stock}</span>
+            </div>
+        `;
+        item.onclick = (e) => {
+            e.preventDefault();
+            selectProduct(product);
+        };
+        resultsList.appendChild(item);
+    });
+    
+    resultsDiv.style.display = 'block';
+}
+
+function selectProduct(product) {
+    document.getElementById('selectedArticle').value = product.article;
+    document.getElementById('selectedName').value = product.name;
+    document.getElementById('selectedModel').value = product.model || '';
+    
+    document.getElementById('selectedProductName').textContent = product.name;
+    document.getElementById('selectedProductArticle').textContent = `Артикул: ${product.article}`;
+    document.getElementById('selectedProductModel').textContent = product.model ? `Модель: ${product.model}` : '';
+    
+    document.getElementById('selectedProductInfo').style.display = 'block';
+    document.getElementById('searchResults').style.display = 'none';
+    document.getElementById('productSearch').value = product.name;
+}
+
+function toggleManualInput() {
+    const manualCheck = document.getElementById('manualInputCheck');
+    const manualFields = document.getElementById('manualInputFields');
+    const searchResults = document.getElementById('searchResults');
+    const selectedInfo = document.getElementById('selectedProductInfo');
+    
+    if (manualCheck.checked) {
+        manualFields.style.display = 'block';
+        searchResults.style.display = 'none';
+        selectedInfo.style.display = 'none';
+    } else {
+        manualFields.style.display = 'none';
+    }
+}
+
+function showAddItemModal() {
+    document.getElementById('itemModalTitle').textContent = 'Добавить товар';
+    document.getElementById('editIndex').value = '-1';
+    document.getElementById('itemForm').reset();
+    document.getElementById('itemQuantity').value = '1';
+    document.getElementById('manualInputFields').style.display = 'none';
+    document.getElementById('manualInputCheck').checked = false;
+    document.getElementById('selectedProductInfo').style.display = 'none';
+    document.getElementById('searchResults').style.display = 'none';
+    
+    new bootstrap.Modal(document.getElementById('itemModal')).show();
+}
+
+function editItem(button) {
+    const row = button.closest('tr');
+    const index = row.dataset.id;
+    const article = row.dataset.article;
+    const name = row.dataset.name;
+    const model = row.dataset.model || '';
+    const quantity = row.dataset.quantity;
+    
+    document.getElementById('itemModalTitle').textContent = 'Редактировать товар';
+    document.getElementById('editIndex').value = index;
+    document.getElementById('itemQuantity').value = quantity;
+    
+    // Заполняем данные
+    document.getElementById('selectedArticle').value = article;
+    document.getElementById('selectedName').value = name;
+    document.getElementById('selectedModel').value = model;
+    
+    document.getElementById('selectedProductName').textContent = name;
+    document.getElementById('selectedProductArticle').textContent = `Артикул: ${article}`;
+    document.getElementById('selectedProductModel').textContent = model ? `Модель: ${model}` : '';
+    document.getElementById('selectedProductInfo').style.display = 'block';
+    document.getElementById('productSearch').value = name;
+    
+    document.getElementById('manualInputFields').style.display = 'none';
+    document.getElementById('manualInputCheck').checked = false;
+    
+    currentEditRow = row;
+    new bootstrap.Modal(document.getElementById('itemModal')).show();
+}
+
+function saveItem() {
+    let article, name, model;
+    const quantity = parseInt(document.getElementById('itemQuantity').value);
+    const editIndex = parseInt(document.getElementById('editIndex').value);
+    const manualCheck = document.getElementById('manualInputCheck').checked;
+    
+    if (manualCheck) {
+        article = document.getElementById('manualArticle').value.trim();
+        name = document.getElementById('manualName').value.trim();
+        model = document.getElementById('manualModel').value.trim();
+    } else {
+        article = document.getElementById('selectedArticle').value;
+        name = document.getElementById('selectedName').value;
+        model = document.getElementById('selectedModel').value;
+    }
+    
+    if (!article || !name || !quantity) {
+        alert('Заполните все обязательные поля');
+        return;
+    }
+    
+    if (editIndex === -1) {
+        // Добавление нового товара
+        addNewItem(article, name, model, quantity);
+    } else {
+        // Редактирование существующего
+        updateItem(editIndex, article, name, model, quantity);
+    }
+    
+    bootstrap.Modal.getInstance(document.getElementById('itemModal')).hide();
+}
+
+function addNewItem(article, name, model, quantity) {
+    const tbody = document.getElementById('orderItemsBody');
+    const newRow = document.createElement('tr');
+    const newIndex = orderItems.length;
+    
+    newRow.dataset.id = newIndex;
+    newRow.dataset.article = article;
+    newRow.dataset.name = name;
+    newRow.dataset.model = model;
+    newRow.dataset.quantity = quantity;
+    
+    newRow.innerHTML = `
+        <td>${newIndex + 1}</td>
+        <td><code>${article}</code></td>
+        <td>${name}</td>
+        <td>${model || ''}</td>
+        <td>${quantity}</td>
+        <td>
+            <button class="btn btn-sm btn-warning" onclick="editItem(this)">
+                <i class="fas fa-edit"></i>
+            </button>
+            <button class="btn btn-sm btn-danger" onclick="deleteItem(this)">
+                <i class="fas fa-trash"></i>
+            </button>
+        </td>
+    `;
+    
+    tbody.appendChild(newRow);
+    orderItems.push({ article, name, model, quantity });
+    updateTotalQuantity();
+    markAsModified();
+}
+
+function updateItem(index, article, name, model, quantity) {
+    const row = document.querySelector(`tr[data-id="${index}"]`);
+    if (row) {
+        row.dataset.article = article;
+        row.dataset.name = name;
+        row.dataset.model = model;
+        row.dataset.quantity = quantity;
+        
+        row.cells[0].textContent = index + 1;
+        row.cells[1].innerHTML = `<code>${article}</code>`;
+        row.cells[2].textContent = name;
+        row.cells[3].textContent = model || '';
+        row.cells[4].textContent = quantity;
+        
+        orderItems[index] = { article, name, model, quantity };
+        updateTotalQuantity();
+        markAsModified();
+    }
+}
+
+function deleteItem(button) {
+    const row = button.closest('tr');
+    const index = row.dataset.id;
+    const name = row.dataset.name;
+    
+    document.getElementById('deleteItemInfo').textContent = `Товар: ${name}`;
+    currentDeleteRow = row;
+    new bootstrap.Modal(document.getElementById('deleteConfirmModal')).show();
+}
+
+function confirmDelete() {
+    if (currentDeleteRow) {
+        const index = parseInt(currentDeleteRow.dataset.id);
+        currentDeleteRow.remove();
+        orderItems.splice(index, 1);
+        
+        // Обновляем индексы
+        const rows = document.querySelectorAll('#orderItemsBody tr');
+        rows.forEach((row, newIndex) => {
+            row.dataset.id = newIndex;
+            row.cells[0].textContent = newIndex + 1;
+        });
+        
+        updateTotalQuantity();
+        markAsModified();
+    }
+    
+    bootstrap.Modal.getInstance(document.getElementById('deleteConfirmModal')).hide();
+}
+
+function updateTotalQuantity() {
+    const total = orderItems.reduce((sum, item) => sum + item.quantity, 0);
+    document.getElementById('totalQuantity').textContent = total;
+}
+
+function markAsModified() {
+    const saveBtn = document.querySelector('.btn-info');
+    saveBtn.classList.remove('btn-info');
+    saveBtn.classList.add('btn-warning');
+}
+
+function saveChanges() {
+    Swal.fire({
+        title: 'Сохранение...',
+        text: 'Пожалуйста, подождите',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
+    
+    fetch(`/order/{{ order_number }}/update`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            items: orderItems
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        Swal.close();
+        
+        if (data.success) {
+            Swal.fire({
+                title: 'Успех!',
+                text: 'Изменения сохранены',
+                icon: 'success',
+                timer: 1500,
+                showConfirmButton: false
+            }).then(() => {
+                location.reload();
+            });
+        } else {
+            Swal.fire({
+                title: 'Ошибка!',
+                text: data.error || 'Ошибка при сохранении',
+                icon: 'error',
+                confirmButtonText: 'OK'
+            });
+        }
+    })
+    .catch(error => {
+        Swal.close();
+        Swal.fire({
+            title: 'Ошибка!',
+            text: 'Ошибка при сохранении',
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+    });
+}
+
+function exportOrder() {
+    window.location.href = "{{ url_for('export_order', order_number=order_number) }}";
+}
+
+// Поиск при вводе
+document.getElementById('productSearch').addEventListener('input', function() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(searchProducts, 300);
+});
+</script>
+{% endblock %}
