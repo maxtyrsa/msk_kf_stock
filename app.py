@@ -1,13 +1,12 @@
 from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, flash, session, make_response
 import csv
-import datetime
 import os
 import json
 import re
 import pdfplumber
 from werkzeug.utils import secure_filename
 import openpyxl
-from openpyxl.styles import Font, Alignment, Border, Side
+from openpyxl.styles import Font
 from functools import wraps
 import secrets
 from datetime import datetime, timedelta
@@ -270,6 +269,13 @@ def utility_processor():
     def now():
         return datetime.now()
     return dict(now=now)
+
+
+def make_timestamped_filename(original_filename, prefix=''):
+    """Генерирует безопасное имя файла с временной меткой."""
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    normalized_prefix = f"{prefix}_" if prefix else ''
+    return secure_filename(f"{normalized_prefix}{timestamp}_{original_filename}")
 
 
 def load_products():
@@ -1224,7 +1230,7 @@ def upload_products():
         if file_ext not in {'.xlsx', '.xls', '.csv'}:
             return jsonify({'success': False, 'error': 'Неверный формат файла. Разрешены: Excel, CSV'})
         
-        filename = secure_filename(f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+        filename = make_timestamped_filename(file.filename, 'upload')
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
@@ -1430,7 +1436,7 @@ def upload_new_products():
         if file_ext not in {'.xlsx', '.xls', '.csv'}:
             return jsonify({'success': False, 'error': 'Неверный формат файла. Разрешены: Excel, CSV'})
         
-        filename = secure_filename(f"new_products_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+        filename = make_timestamped_filename(file.filename, 'new_products')
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
@@ -2487,7 +2493,7 @@ def upload_pdf():
     if not file.filename.lower().endswith('.pdf'):
         return jsonify({'success': False, 'error': 'Неверный формат файла. Разрешены только PDF'})
     
-    filename = secure_filename(f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+    filename = make_timestamped_filename(file.filename)
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
     
@@ -2798,7 +2804,7 @@ def debug_pdf_parser():
         if not file.filename.lower().endswith('.pdf'):
             return jsonify({'success': False, 'error': 'Неверный формат файла'})
         
-        filename = secure_filename(f"debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+        filename = make_timestamped_filename(file.filename, 'debug')
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
@@ -2880,7 +2886,7 @@ def upload_ozon():
     if file_ext not in {'.xlsx', '.xls'}:
         return jsonify({'success': False, 'error': 'Неверный формат файла. Разрешены только Excel файлы (.xlsx, .xls)'})
     
-    filename = secure_filename(f"ozon_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+    filename = make_timestamped_filename(file.filename, 'ozon')
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
     
@@ -3381,7 +3387,7 @@ def upload_income():
     if file_ext not in {'.xlsx', '.xls'}:
         return jsonify({'success': False, 'error': 'Неверный формат файла. Разрешены только Excel файлы (.xlsx, .xls)'})
     
-    filename = secure_filename(f"income_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+    filename = make_timestamped_filename(file.filename, 'income')
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
     
@@ -4380,7 +4386,7 @@ def upload_wb():
     if file_ext not in {'.xlsx', '.xls'}:
         return jsonify({'success': False, 'error': 'Неверный формат файла. Разрешены только Excel файлы (.xlsx, .xls)'})
     
-    filename = secure_filename(f"wb_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+    filename = make_timestamped_filename(file.filename, 'wb')
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
     
@@ -4456,7 +4462,7 @@ def upload_wb_mapping():
             return jsonify({'success': False, 'error': 'Неверный формат файла. Разрешены: Excel, CSV'})
         
         # Сохраняем файл
-        filename = secure_filename(f"mapping_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+        filename = make_timestamped_filename(file.filename, 'mapping')
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
@@ -5113,7 +5119,7 @@ def upload_async():
         return jsonify({'success': False, 'error': 'Файл не выбран'})
     
     # Сохраняем файл
-    filename = secure_filename(f"async_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+    filename = make_timestamped_filename(file.filename, 'async')
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
     
