@@ -1,15 +1,16 @@
 import { asyncHandler } from '../middleware/errorHandler.js';
-import pool from '../utils/db.js';
+import jsonDb from '../utils/jsonDb.js';
 import { productLogger } from '../utils/logger.js';
 
 /**
  * Product Controller - CRUD operations and high-performance search
+ * Refactored from PostgreSQL to file-based JSON database
  */
 
 /**
  * GET /api/products/search?q=query&page=1&limit=20
- * High-performance search with ILIKE across Name, Model, and SKU (Article)
- * Uses pg_trgm GIN indexes for fast partial matching
+ * High-performance search with case-insensitive partial matching
+ * Uses linear filtering with includes() for JSON database
  */
 export const searchProducts = asyncHandler(async (req, res) => {
   const { q, page = 1, limit = 20 } = req.query;
@@ -22,53 +23,23 @@ export const searchProducts = asyncHandler(async (req, res) => {
   }
 
   const offset = (page - 1) * limit;
-  const searchTerm = `%${q.trim()}%`;
+  const searchTerm = q.trim();
 
-  // High-performance search using ILIKE with pg_trgm indexes
-  const query = `
-    SELECT 
-      id, name, model, article, quantity, created_at, updated_at,
-      similarity(name, $1) + similarity(model, $1) + similarity(article, $1) as relevance
-    FROM products
-    WHERE 
-      name ILIKE $1 OR 
-      model ILIKE $1 OR 
-      article ILIKE $1
-    ORDER BY 
-      relevance DESC,
-      quantity DESC,
-      name ASC
-    LIMIT $2 OFFSET $3
-  `;
+  // Search using JSON database with case-insensitive partial matching
+  const result = jsonDb.searchProducts(searchTerm, parseInt(limit), parseInt(offset));
 
-  const countQuery = `
-    SELECT COUNT(*) as total
-    FROM products
-    WHERE 
-      name ILIKE $1 OR 
-      model ILIKE $1 OR 
-      article ILIKE $1
-  `;
-
-  const [results, countResult] = await Promise.all([
-    pool.query(query, [searchTerm, parseInt(limit), parseInt(offset)]),
-    pool.query(countQuery, [searchTerm])
-  ]);
-
-  const total = parseInt(countResult.rows[0].total);
-
-  productLogger.info({ query: q, results: results.rows.length, total }, 'Product search executed');
+  productLogger.info({ query: searchTerm, results: result.products.length, total: result.total }, 'Product search executed');
 
   res.json({
     success: true,
     data: {
-      products: results.rows,
+      products: result.products,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        totalPages: Math.ceil(total / limit),
-        hasMore: offset + results.rows.length < total
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: result.totalPages,
+        hasMore: result.hasMore
       }
     }
   });
@@ -90,52 +61,20 @@ export const getProducts = asyncHandler(async (req, res) => {
 
   const offset = (page - 1) * limit;
   
-  let whereClause = 'WHERE 1=1';
-  const params = [];
-  let paramIndex = 1;
+  const options = {
+    limit: parseInt(limit),
+    offset: parseInt(offset),
+    lowStock,
+    category,
+    sortBy,
+    sortOrder
+  };
 
-  if (lowStock === 'true') {
-    whereClause += ` AND quantity <= $${paramIndex}`;
-    params.push(5);
-    paramIndex++;
-  }
-
-  const validSortColumns = ['name', 'model', 'article', 'quantity', 'created_at', 'updated_at'];
-  const sortColumn = validSortColumns.includes(sortBy) ? sortBy : 'name';
-  const order = sortOrder.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
-
-  const query = `
-    SELECT id, name, model, article, quantity, created_at, updated_at
-    FROM products
-    ${whereClause}
-    ORDER BY ${sortColumn} ${order}
-    LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
-  `;
-
-  params.push(parseInt(limit), parseInt(offset));
-
-  const countQuery = `
-    SELECT COUNT(*) as total
-    FROM products
-    ${whereClause}
-  `;
-
-  const [results, countResult] = await Promise.all([
-    pool.query(query, params),
-    pool.query(countQuery, params.slice(0, -2))
-  ]);
+  const result = jsonDb.getProducts(options);
 
   res.json({
     success: true,
-    data: {
-      products: results.rows,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: parseInt(countResult.rows[0].total),
-        totalPages: Math.ceil(parseInt(countResult.rows[0].total) / limit)
-      }
-    }
+    data: result
   });
 });
 
@@ -146,12 +85,9 @@ export const getProducts = asyncHandler(async (req, res) => {
 export const getProductById = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const result = await pool.query(
-    'SELECT * FROM products WHERE id = $1',
-    [id]
-  );
+  const product = jsonDb.findProductById(id);
 
-  if (result.rows.length === 0) {
+  if (!product) {
     return res.status(404).json({
       success: false,
       message: 'Product not found'
@@ -160,7 +96,7 @@ export const getProductById = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    data: result.rows[0]
+    data: product
   });
 });
 
@@ -171,12 +107,9 @@ export const getProductById = asyncHandler(async (req, res) => {
 export const getProductByArticle = asyncHandler(async (req, res) => {
   const { article } = req.params;
 
-  const result = await pool.query(
-    'SELECT * FROM products WHERE article = $1',
-    [article]
-  );
+  const product = jsonDb.findProductByArticle(article);
 
-  if (result.rows.length === 0) {
+  if (!product) {
     return res.status(404).json({
       success: false,
       message: 'Product not found'
@@ -185,7 +118,7 @@ export const getProductByArticle = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    data: result.rows[0]
+    data: product
   });
 });
 
@@ -196,18 +129,13 @@ export const getProductByArticle = asyncHandler(async (req, res) => {
 export const createProduct = asyncHandler(async (req, res) => {
   const { name, model, article, quantity = 0 } = req.body;
 
-  const result = await pool.query(
-    `INSERT INTO products (name, model, article, quantity)
-     VALUES ($1, $2, $3, $4)
-     RETURNING *`,
-    [name, model || null, article, parseInt(quantity)]
-  );
+  const newProduct = jsonDb.createProduct({ name, model, article, quantity });
 
-  productLogger.info({ productId: result.rows[0].id, article }, 'Product created');
+  productLogger.info({ productId: newProduct.id, article }, 'Product created');
 
   res.status(201).json({
     success: true,
-    data: result.rows[0],
+    data: newProduct,
     message: 'Product created successfully'
   });
 });
@@ -220,18 +148,15 @@ export const updateProduct = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { name, model, article, quantity } = req.body;
 
-  const result = await pool.query(
-    `UPDATE products 
-     SET name = COALESCE($1, name),
-         model = COALESCE($2, model),
-         article = COALESCE($3, article),
-         quantity = COALESCE($4, quantity)
-     WHERE id = $5
-     RETURNING *`,
-    [name, model, article, quantity !== undefined ? parseInt(quantity) : undefined, id]
-  );
+  const updates = {};
+  if (name !== undefined) updates.name = name;
+  if (model !== undefined) updates.model = model;
+  if (article !== undefined) updates.article = article;
+  if (quantity !== undefined) updates.quantity = quantity;
 
-  if (result.rows.length === 0) {
+  const updatedProduct = jsonDb.updateProduct(id, updates);
+
+  if (!updatedProduct) {
     return res.status(404).json({
       success: false,
       message: 'Product not found'
@@ -242,7 +167,7 @@ export const updateProduct = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    data: result.rows[0],
+    data: updatedProduct,
     message: 'Product updated successfully'
   });
 });
@@ -254,12 +179,9 @@ export const updateProduct = asyncHandler(async (req, res) => {
 export const deleteProduct = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const result = await pool.query(
-    'DELETE FROM products WHERE id = $1 RETURNING *',
-    [id]
-  );
+  const deletedProduct = jsonDb.deleteProduct(id);
 
-  if (result.rows.length === 0) {
+  if (!deletedProduct) {
     return res.status(404).json({
       success: false,
       message: 'Product not found'
@@ -281,20 +203,14 @@ export const deleteProduct = asyncHandler(async (req, res) => {
 export const getLowStockProducts = asyncHandler(async (req, res) => {
   const threshold = parseInt(req.query.threshold) || 5;
 
-  const result = await pool.query(
-    `SELECT id, name, model, article, quantity
-     FROM products
-     WHERE quantity <= $1
-     ORDER BY quantity ASC`,
-    [threshold]
-  );
+  const products = jsonDb.getLowStockProducts(threshold);
 
   res.json({
     success: true,
     data: {
-      products: result.rows,
+      products,
       threshold,
-      count: result.rows.length
+      count: products.length
     }
   });
 });

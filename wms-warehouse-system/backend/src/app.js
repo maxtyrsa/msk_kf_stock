@@ -9,8 +9,12 @@ import dotenv from 'dotenv';
 import routes from './routes/index.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import logger from './utils/logger.js';
+import jsonDb from './utils/jsonDb.js';
 
 dotenv.config();
+
+// Initialize JSON database on startup
+jsonDb.init();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
